@@ -552,13 +552,25 @@
   // PHOTO PICKER & REORDERING
   // ----------------------------------------------------------------------------
   async function handleFilesSelected(fileList) {
-    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
 
-    setProgress('Compressing photos...', 20);
+    setProgress(`Optimizing ${files.length} photo${files.length > 1 ? 's' : ''}...`, 15);
 
-    for (let i = 0; i < fileList.length; i++) {
-      const file = fileList[i];
-      if (!file.type.startsWith('image/')) continue;
+    let processedCount = 0;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const isImg = (file.type && file.type.startsWith('image/')) ||
+                    /\.(jpe?g|png|webp|gif|bmp|heic|heif|jfif)$/i.test(file.name || '') ||
+                    !file.type;
+      if (!isImg) {
+        console.warn('Skipping non-image file:', file.name, file.type);
+        continue;
+      }
+
+      const currentStep = i + 1;
+      const progressPct = Math.round(15 + (currentStep / files.length) * 75);
+      setProgress(`Optimizing photo ${currentStep} of ${files.length}...`, progressPct);
 
       try {
         const { blob, previewUrl } = await compressImage(file, 1200, 0.8);
@@ -568,14 +580,31 @@
           blob: blob,
           previewUrl: previewUrl
         });
+        processedCount++;
       } catch (err) {
-        console.error('Failed to compress image:', err);
-        showToast(`Could not process image ${file.name}`);
+        console.warn(`Compression fallback for ${file.name}:`, err);
+        try {
+          const fallbackUrl = URL.createObjectURL(file);
+          state.currentPhotos.push({
+            type: 'new',
+            file: file,
+            blob: file,
+            previewUrl: fallbackUrl
+          });
+          processedCount++;
+        } catch (fallbackErr) {
+          console.error('Failed to process image:', file.name, fallbackErr);
+          showToast(`Could not process photo: ${file.name}`);
+        }
       }
     }
 
     setProgress(null, null);
     renderPhotoPreviews();
+
+    if (processedCount > 0) {
+      showToast(`${processedCount} photo${processedCount > 1 ? 's' : ''} added! Total: ${state.currentPhotos.length}`);
+    }
 
     if (state.currentPhotos.length > 0) {
       triggerPhotoColorDetection(state.currentPhotos[0]);
@@ -1281,29 +1310,39 @@
 
       if (item.type === 'existing') {
         finalUrls.push(item.url);
-      } else if (item.type === 'new' && item.blob) {
+      } else if (item.type === 'new') {
+        const uploadBlob = item.blob || item.file;
+        if (!uploadBlob) {
+          console.warn('Skipping photo item with no blob/file:', item);
+          continue;
+        }
+
         uploadedCount++;
-        const percent = (uploadedCount / (totalToUpload + 1)) * 50;
+        const percent = Math.round((uploadedCount / Math.max(totalToUpload, 1)) * 50);
         setProgress(`Uploading photo ${uploadedCount} of ${totalToUpload}...`, percent);
 
         const timestamp = Date.now();
-        const rand = Math.random().toString(36).substring(2, 7);
-        const filename = `saree_${timestamp}_${rand}.jpg`;
+        const rand = Math.random().toString(36).substring(2, 8);
+        const ext = (item.file && item.file.name ? item.file.name.split('.').pop() : 'jpg').toLowerCase() || 'jpg';
+        const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
+        const filename = `saree_${timestamp}_${i}_${rand}.${safeExt}`;
+
+        const contentType = (uploadBlob && uploadBlob.type) ? uploadBlob.type : 'image/jpeg';
 
         const { error } = await state.supabaseClient.storage
           .from(bucket)
-          .upload(filename, item.blob, {
-            contentType: 'image/jpeg',
+          .upload(filename, uploadBlob, {
+            contentType: contentType,
             upsert: false
           });
 
-        if (error) throw new Error(`Failed to upload ${filename}: ${error.message}`);
+        if (error) throw new Error(`Failed to upload photo ${uploadedCount} (${filename}): ${error.message}`);
 
         const { data: urlData } = state.supabaseClient.storage
           .from(bucket)
           .getPublicUrl(filename);
 
-        if (!urlData || !urlData.publicUrl) throw new Error('Failed to retrieve photo public URL.');
+        if (!urlData || !urlData.publicUrl) throw new Error(`Failed to retrieve public URL for photo ${uploadedCount}.`);
 
         finalUrls.push(urlData.publicUrl);
       }
@@ -1611,7 +1650,14 @@
     if (dom.priceAlternativesWrap) dom.priceAlternativesWrap.style.display = 'none';
 
     // Photos
-    const imgs = Array.isArray(saree.images) ? saree.images : [];
+    let imgs = [];
+    if (Array.isArray(saree.images)) {
+      imgs = saree.images.filter(Boolean);
+    } else if (typeof saree.images === 'string' && saree.images.trim()) {
+      imgs = saree.images.split(',').map(s => s.trim()).filter(Boolean);
+    } else if (saree.image_url) {
+      imgs = [saree.image_url];
+    }
     state.currentPhotos = imgs.map(url => ({
       type: 'existing',
       url: url,
@@ -1681,7 +1727,14 @@
     // Load private buying cost
     loadPrivateSareeData(saree.id);
 
-    const imgs = Array.isArray(saree.images) ? saree.images : [];
+    let imgs = [];
+    if (Array.isArray(saree.images)) {
+      imgs = saree.images.filter(Boolean);
+    } else if (typeof saree.images === 'string' && saree.images.trim()) {
+      imgs = saree.images.split(',').map(s => s.trim()).filter(Boolean);
+    } else if (saree.image_url) {
+      imgs = [saree.image_url];
+    }
     state.currentPhotos = imgs.map(url => ({
       type: 'existing',
       url: url,
@@ -2049,11 +2102,15 @@
   }
 
   async function handleReviewPhotosSelected(fileList) {
-    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
 
-    for (let i = 0; i < fileList.length; i++) {
-      const file = fileList[i];
-      if (!file.type.startsWith('image/')) continue;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const isImg = (file.type && file.type.startsWith('image/')) ||
+                    /\.(jpe?g|png|webp|gif|bmp|heic|heif|jfif)$/i.test(file.name || '') ||
+                    !file.type;
+      if (!isImg) continue;
 
       try {
         const { blob, previewUrl } = await compressImage(file, 1200, 0.82);
@@ -2064,7 +2121,17 @@
           previewUrl: previewUrl
         });
       } catch (err) {
-        console.error('Failed to compress review photo:', err);
+        console.warn('Fallback to original file for review photo:', file.name, err);
+        try {
+          state.currentReviewPhotos.push({
+            type: 'new',
+            file: file,
+            blob: file,
+            previewUrl: URL.createObjectURL(file)
+          });
+        } catch (fallbackErr) {
+          console.error('Failed to process review photo:', file.name, fallbackErr);
+        }
       }
     }
 
@@ -2080,16 +2147,22 @@
 
       if (item.type === 'existing' || item.type === 'link') {
         finalUrls.push(item.url);
-      } else if (item.type === 'new' && item.blob) {
+      } else if (item.type === 'new') {
+        const uploadBlob = item.blob || item.file;
+        if (!uploadBlob) continue;
+
         const timestamp = Date.now();
-        const rand = Math.random().toString(36).substring(2, 7);
-        const filename = `review_${timestamp}_${rand}.jpg`;
+        const rand = Math.random().toString(36).substring(2, 8);
+        const ext = (item.file && item.file.name ? item.file.name.split('.').pop() : 'jpg').toLowerCase() || 'jpg';
+        const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
+        const filename = `review_${timestamp}_${i}_${rand}.${safeExt}`;
+        const contentType = uploadBlob.type || 'image/jpeg';
 
         if (state.supabaseClient) {
           const { error } = await state.supabaseClient.storage
             .from(bucket)
-            .upload(filename, item.blob, {
-              contentType: 'image/jpeg',
+            .upload(filename, uploadBlob, {
+              contentType: contentType,
               upsert: false
             });
 
@@ -2838,9 +2911,12 @@
       dom.btnChooseReviewPhotos.addEventListener('click', () => dom.reviewPhotoFileInput.click());
     }
     if (dom.reviewPhotoFileInput) {
-      dom.reviewPhotoFileInput.addEventListener('change', e => {
-        handleReviewPhotosSelected(e.target.files);
+      dom.reviewPhotoFileInput.addEventListener('change', async e => {
+        const files = Array.from(e.target.files || []);
         dom.reviewPhotoFileInput.value = '';
+        if (files.length > 0) {
+          await handleReviewPhotosSelected(files);
+        }
       });
     }
     if (dom.btnAddReviewPhotoUrl) {
@@ -2881,16 +2957,22 @@
     }
 
     if (dom.imageFilesInput) {
-      dom.imageFilesInput.addEventListener('change', e => {
-        handleFilesSelected(e.target.files);
+      dom.imageFilesInput.addEventListener('change', async e => {
+        const files = Array.from(e.target.files || []);
         dom.imageFilesInput.value = '';
+        if (files.length > 0) {
+          await handleFilesSelected(files);
+        }
       });
     }
 
     if (dom.cameraFileInput) {
-      dom.cameraFileInput.addEventListener('change', e => {
-        handleFilesSelected(e.target.files);
+      dom.cameraFileInput.addEventListener('change', async e => {
+        const files = Array.from(e.target.files || []);
         dom.cameraFileInput.value = '';
+        if (files.length > 0) {
+          await handleFilesSelected(files);
+        }
       });
     }
 
