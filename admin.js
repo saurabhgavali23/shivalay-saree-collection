@@ -6,7 +6,7 @@
  * - Supabase Authentication (login, logout, session persistence across refresh)
  * - Saree CRUD operations (Create, Read, Update, Delete)
  * - Client-side image compression (Canvas resize to 1200px max, JPEG 0.8 quality)
- * - Video Support (Max 15MB, Max 15s duration validation, canvas poster extraction,
+ * - Video Support (Max 15MB, Max 60s duration validation, canvas poster extraction,
  *   direct Supabase Storage upload to 'saree-videos' or YouTube link embedding)
  * - Image reordering (left/right) with cover image designation and deletion
  * - Video and image cleanup from Supabase Storage on saree deletion
@@ -331,12 +331,12 @@
   // CLIENT-SIDE VIDEO VALIDATION & POSTER EXTRACTION
   // ----------------------------------------------------------------------------
   /**
-   * Validates video size (<= 15MB) and duration (<= 15 seconds),
+   * Validates video size (<= 15MB) and duration (<= 60 seconds),
    * and draws the first frame to canvas to produce a JPEG poster.
    */
   function validateAndExtractPoster(file) {
     const maxMb = CONFIG.MAX_VIDEO_SIZE_MB || 15;
-    const maxDuration = CONFIG.MAX_VIDEO_DURATION_SEC || 15;
+    const maxDuration = CONFIG.MAX_VIDEO_DURATION_SEC || 60;
 
     // 1. File size check
     if (file.size > maxMb * 1024 * 1024) {
@@ -358,7 +358,7 @@
 
       video.onloadedmetadata = () => {
         const duration = video.duration;
-        // Allow slight wiggle room of 0.5s for 15s camera recording
+        // Allow slight wiggle room of 0.5s for camera recording
         if (duration > maxDuration + 0.5) {
           clearTimeout(timeoutId);
           URL.revokeObjectURL(objUrl);

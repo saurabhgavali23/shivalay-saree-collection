@@ -25,7 +25,7 @@ const CONFIG = {
 
   // Video limits
   MAX_VIDEO_SIZE_MB: 15,
-  MAX_VIDEO_DURATION_SEC: 15,
+  MAX_VIDEO_DURATION_SEC: 60,
 
   // ----------------------------------------------------------------------------
   // 2. SHOP BRANDING & CONTACT
