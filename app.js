@@ -1698,8 +1698,8 @@
     const photo = state.currentOrderPhoto || saree.mainImage || (saree.images && saree.images[0]) || '';
     const currentUrl = window.location.href;
 
-    let text = `🌸 *${saree.name}*\n` +
-      `🏛️ *${CONFIG.SHOP_NAME}*\n\n` +
+    let text = `*${CONFIG.SHOP_NAME}*\n` +
+      `*${saree.name}*\n\n` +
       `💰 *Price:* ${formatPrice(saree.price)} (${shippingText})\n` +
       `🎨 *Color:* ${chosenColor}\n` +
       `🧵 *Fabric:* ${saree.fabric}\n` +
