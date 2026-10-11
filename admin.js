@@ -55,6 +55,7 @@
     // Navigation & Auth Header
     dom.adminShopTitle = document.getElementById('admin-shop-title');
     dom.adminUserEmail = document.getElementById('admin-user-email');
+    dom.headerStatsBtn = document.getElementById('header-stats-btn');
     dom.btnLogout = document.getElementById('btn-logout');
 
     // Views
@@ -69,6 +70,7 @@
     dom.btnLogin = document.getElementById('btn-login');
 
     // Tabs
+    dom.adminTabsNav = document.querySelector('.admin-tabs');
     dom.tabFormBtn = document.getElementById('tab-form-btn');
     dom.tabListBtn = document.getElementById('tab-list-btn');
     dom.tabReviewsBtn = document.getElementById('tab-reviews-btn');
@@ -85,6 +87,7 @@
     dom.formTabLabel = document.getElementById('form-tab-label');
 
     // Stats DOM
+    dom.statsBannerNotice = document.getElementById('stats-banner-notice');
     dom.btnRefreshStats = document.getElementById('btn-refresh-stats');
     dom.btnPurgeOldEvents = document.getElementById('btn-purge-old-events');
     dom.btnPurgeOldEventsBottom = document.getElementById('btn-purge-old-events-bottom');
@@ -493,9 +496,11 @@
     if (dom.authView) dom.authView.style.display = 'none';
     if (dom.dashboardView) dom.dashboardView.classList.add('active');
     if (dom.btnLogout) dom.btnLogout.style.display = 'inline-flex';
+    if (dom.headerStatsBtn) dom.headerStatsBtn.style.display = 'inline-flex';
     if (dom.adminUserEmail) dom.adminUserEmail.textContent = user.email || 'Admin';
 
     loadAllSarees();
+    checkUrlHashTab();
   }
 
   function setLoggedOut() {
@@ -508,6 +513,7 @@
     if (dom.authView) dom.authView.style.display = 'flex';
     if (dom.dashboardView) dom.dashboardView.classList.remove('active');
     if (dom.btnLogout) dom.btnLogout.style.display = 'none';
+    if (dom.headerStatsBtn) dom.headerStatsBtn.style.display = 'none';
     if (dom.adminUserEmail) dom.adminUserEmail.textContent = '';
     if (dom.orphanTabBadge) dom.orphanTabBadge.textContent = 'Scan';
   }
@@ -2890,6 +2896,19 @@
       return;
     }
 
+    if (state.isLoadingStats) return;
+    state.isLoadingStats = true;
+
+    if (dom.btnRefreshStats) {
+      dom.btnRefreshStats.disabled = true;
+      dom.btnRefreshStats.textContent = '⏳ Loading...';
+    }
+
+    if (dom.statsBannerNotice) {
+      dom.statsBannerNotice.style.display = 'none';
+      dom.statsBannerNotice.innerHTML = '';
+    }
+
     if (dom.statsDailyChartWrap) {
       dom.statsDailyChartWrap.innerHTML = `
         <div style="text-align: center; padding: 2.5rem; color: #64748b; font-size: 0.85rem;">
@@ -2922,24 +2941,61 @@
 
       processAndRenderStats(state.statsEvents, state.allSarees);
 
+      if (state.statsEvents.length === 0 && dom.statsBannerNotice) {
+        dom.statsBannerNotice.style.display = 'block';
+        dom.statsBannerNotice.innerHTML = `
+          <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 0.9rem 1.1rem; color: #166534; font-size: 0.85rem; display: flex; align-items: flex-start; gap: 0.65rem;">
+            <span style="font-size: 1.1rem; line-height: 1;">💡</span>
+            <div>
+              <strong>Analytics table is connected!</strong>
+              <p style="margin: 0.2rem 0 0 0; color: #15803d; font-size: 0.8rem; line-height: 1.4;">
+                No visitor traffic recorded yet. Saree views and WhatsApp order clicks will appear here automatically in real time as visitors browse your website.
+              </p>
+            </div>
+          </div>
+        `;
+      }
+
     } catch (err) {
       console.error('Failed to load statistics:', err);
-      showToast('Could not load statistics: ' + err.message);
-      if (dom.statsDailyChartWrap) {
-        dom.statsDailyChartWrap.innerHTML = `
-          <div style="text-align: center; padding: 2.5rem 1rem; color: #dc2626;">
-            <p style="font-weight: 700; margin-bottom: 0.5rem;">⚠️ Statistics Not Available Yet</p>
-            <p style="font-size: 0.82rem; color: #64748b; margin-bottom: 1rem;">
-              Make sure you have run the updated SQL in <code>supabase-setup.sql</code> in your Supabase SQL Editor.<br>
-              ${escapeHtml(err.message)}
+      showToast('Stats error: ' + err.message);
+
+      if (dom.statsBannerNotice) {
+        dom.statsBannerNotice.style.display = 'block';
+        dom.statsBannerNotice.innerHTML = `
+          <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 1rem 1.25rem; color: #991b1b; font-size: 0.85rem;">
+            <div style="font-weight: 700; margin-bottom: 0.35rem; display: flex; align-items: center; gap: 0.5rem;">
+              <span>⚠️</span>
+              <span>Statistics Table Setup Required in Supabase</span>
+            </div>
+            <p style="margin: 0 0 0.65rem 0; font-size: 0.82rem; color: #7f1d1d; line-height: 1.5;">
+              To view analytics, make sure the <code>saree_events</code> table has been created in your Supabase project.<br>
+              Run the SQL script from <code>supabase-setup.sql</code> in your Supabase SQL Editor.
             </p>
-            <button type="button" id="btn-stats-retry" class="btn-secondary" style="font-size: 0.82rem;">
-              🔄 Retry
+            <div style="font-size: 0.78rem; font-family: monospace; background: #fee2e2; padding: 0.35rem 0.65rem; border-radius: 4px; margin-bottom: 0.75rem; word-break: break-all;">
+              ${escapeHtml(err.message)}
+            </div>
+            <button type="button" id="btn-stats-banner-retry" class="btn-primary" style="font-size: 0.8rem; padding: 0.35rem 0.85rem;">
+              🔄 Retry Fetch
             </button>
           </div>
         `;
-        const retryBtn = document.getElementById('btn-stats-retry');
-        if (retryBtn) retryBtn.addEventListener('click', loadStatsData);
+        const bannerRetry = document.getElementById('btn-stats-banner-retry');
+        if (bannerRetry) bannerRetry.addEventListener('click', loadStatsData);
+      }
+
+      if (dom.statsDailyChartWrap) {
+        dom.statsDailyChartWrap.innerHTML = `
+          <div style="text-align: center; padding: 2rem 1rem; color: #94a3b8; font-size: 0.85rem;">
+            Analytics chart will display here once <code>saree_events</code> table is active.
+          </div>
+        `;
+      }
+    } finally {
+      state.isLoadingStats = false;
+      if (dom.btnRefreshStats) {
+        dom.btnRefreshStats.disabled = false;
+        dom.btnRefreshStats.textContent = '🔄 Refresh Stats';
       }
     }
   }
@@ -3459,6 +3515,31 @@
     if (dom.tabCleanupContent) dom.tabCleanupContent.style.display = tabName === 'cleanup' ? 'block' : 'none';
     if (dom.tabStatsContent) dom.tabStatsContent.style.display = tabName === 'stats' ? 'block' : 'none';
 
+    // Scroll active button into view on mobile horizontal tabs
+    const tabMap = {
+      form: dom.tabFormBtn,
+      list: dom.tabListBtn,
+      reviews: dom.tabReviewsBtn,
+      cleanup: dom.tabCleanupBtn,
+      stats: dom.tabStatsBtn
+    };
+    const activeBtn = tabMap[tabName];
+    if (activeBtn && typeof activeBtn.scrollIntoView === 'function') {
+      try {
+        activeBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      } catch (e) {}
+    }
+
+    // Scroll window to top smoothly
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    // Sync URL hash
+    try {
+      if (window.location.hash !== '#' + tabName) {
+        history.replaceState(null, '', '#' + tabName);
+      }
+    } catch (e) {}
+
     if (tabName === 'reviews') {
       populateReviewSareeDropdown();
     } else if (tabName === 'cleanup') {
@@ -3470,6 +3551,21 @@
     }
   }
 
+  function checkUrlHashTab() {
+    const hash = (window.location.hash || '').replace('#', '').toLowerCase();
+    if (hash === 'stats' || hash === 'analytics') {
+      switchToTab('stats');
+    } else if (hash === 'list' || hash === 'sarees' || hash === 'manage') {
+      switchToTab('list');
+    } else if (hash === 'reviews') {
+      switchToTab('reviews');
+    } else if (hash === 'cleanup' || hash === 'storage') {
+      switchToTab('cleanup');
+    } else if (hash === 'form' || hash === 'add') {
+      switchToTab('form');
+    }
+  }
+
   // ----------------------------------------------------------------------------
   // EVENT LISTENERS
   // ----------------------------------------------------------------------------
@@ -3478,12 +3574,31 @@
     if (dom.loginForm) dom.loginForm.addEventListener('submit', handleLogin);
     if (dom.btnLogout) dom.btnLogout.addEventListener('click', handleLogout);
 
-    // Tabs
+    // Header Quick Stats Button
+    if (dom.headerStatsBtn) dom.headerStatsBtn.addEventListener('click', () => switchToTab('stats'));
+
+    // Tabs Individual Click Listeners
     if (dom.tabFormBtn) dom.tabFormBtn.addEventListener('click', () => switchToTab('form'));
     if (dom.tabListBtn) dom.tabListBtn.addEventListener('click', () => switchToTab('list'));
     if (dom.tabReviewsBtn) dom.tabReviewsBtn.addEventListener('click', () => switchToTab('reviews'));
     if (dom.tabCleanupBtn) dom.tabCleanupBtn.addEventListener('click', () => switchToTab('cleanup'));
     if (dom.tabStatsBtn) dom.tabStatsBtn.addEventListener('click', () => switchToTab('stats'));
+
+    // Event Delegation on .admin-tabs for mobile touch / click reliability
+    if (dom.adminTabsNav) {
+      dom.adminTabsNav.addEventListener('click', (e) => {
+        const btn = e.target.closest('.admin-tab-btn');
+        if (!btn) return;
+        if (btn.id === 'tab-form-btn') switchToTab('form');
+        else if (btn.id === 'tab-list-btn') switchToTab('list');
+        else if (btn.id === 'tab-reviews-btn') switchToTab('reviews');
+        else if (btn.id === 'tab-cleanup-btn') switchToTab('cleanup');
+        else if (btn.id === 'tab-stats-btn') switchToTab('stats');
+      });
+    }
+
+    // URL Hash Routing
+    window.addEventListener('hashchange', checkUrlHashTab);
 
     // Stats Actions
     if (dom.btnRefreshStats) dom.btnRefreshStats.addEventListener('click', loadStatsData);

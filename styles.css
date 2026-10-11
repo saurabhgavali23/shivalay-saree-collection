@@ -1958,24 +1958,70 @@ a:focus-visible {
 .admin-tabs {
   display: flex;
   gap: 0.5rem;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 2px solid #e2e8f0;
   margin-bottom: 1.5rem;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
+}
+
+.admin-tabs::-webkit-scrollbar {
+  height: 4px;
+}
+
+.admin-tabs::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
 }
 
 .admin-tab-btn {
-  padding: 0.75rem 1.25rem;
+  padding: 0.75rem 1.15rem;
   font-size: 0.92rem;
   font-weight: 600;
   color: #64748b;
-  border-bottom: 2px solid transparent;
+  border-bottom: 3px solid transparent;
   white-space: nowrap;
   min-height: 44px;
+  flex-shrink: 0;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: rgba(124, 18, 40, 0.1);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.admin-tab-btn:hover {
+  color: var(--color-primary);
+  background-color: rgba(124, 18, 40, 0.04);
 }
 
 .admin-tab-btn.active {
   color: var(--color-primary);
   border-bottom-color: var(--color-primary);
+  background-color: rgba(124, 18, 40, 0.05);
+}
+
+@media (max-width: 640px) {
+  .admin-tabs {
+    gap: 0.35rem;
+    margin-bottom: 1.25rem;
+    padding-bottom: 4px;
+  }
+  .admin-tab-btn {
+    padding: 0.65rem 0.95rem;
+    font-size: 0.85rem;
+    min-height: 40px;
+  }
 }
 
 /* Saree Add/Edit Form Card */

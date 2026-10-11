@@ -20,7 +20,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 
   <!-- Unified Stylesheet -->
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=2.2">
 
   <!-- Supabase JS Client (Pinned Version from CDN) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.48.1/dist/umd/supabase.min.js"></script>
@@ -42,6 +42,9 @@
 
       <div class="admin-nav-actions">
         <span id="admin-user-email" class="admin-user-pill"></span>
+        <button type="button" id="header-stats-btn" class="btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem; min-height: 36px; display: none;" title="View Saree & Visitor Analytics">
+          📊 Stats
+        </button>
         <a href="index.html" class="btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem; min-height: 36px;" title="View public storefront">
           🛍️ View Store
         </a>
@@ -856,6 +859,9 @@
             </div>
           </div>
 
+          <!-- Immediate Status / Error Banner for Mobile & Desktop -->
+          <div id="stats-banner-notice" style="display: none; margin-bottom: 1.25rem;"></div>
+
           <!-- KPI Summary Cards (Today, 7 Days, 30 Days, All-Time) -->
           <div id="stats-kpi-container" class="stats-summary-grid">
             <div class="stats-kpi-card">
@@ -1047,6 +1053,6 @@
   <!-- Scripts -->
   <script src="config.js"></script>
   <script src="parser.js"></script>
-  <script src="admin.js" defer></script>
+  <script src="admin.js?v=2.2" defer></script>
 </body>
 </html>
