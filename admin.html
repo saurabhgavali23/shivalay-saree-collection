@@ -121,6 +121,9 @@
         <button type="button" id="tab-cleanup-btn" class="admin-tab-btn">
           🧹 Storage Cleanup (<span id="orphan-tab-badge">Scan</span>)
         </button>
+        <button type="button" id="tab-stats-btn" class="admin-tab-btn">
+          📊 Stats &amp; Analytics
+        </button>
       </nav>
 
       <!-- -------------------------------------------------------------------
@@ -825,6 +828,208 @@
                 🔄 Scan Storage Now
               </button>
             </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- -------------------------------------------------------------------
+           TAB 5: VISITOR & SAREE STATS & ANALYTICS
+           ------------------------------------------------------------------- -->
+      <section id="tab-stats-content" style="display: none;">
+        <div class="admin-card">
+          
+          <div class="admin-card-header">
+            <div>
+              <h2 class="admin-card-title">📊 Saree &amp; Visitor Analytics</h2>
+              <p style="font-size: 0.82rem; color: #64748b;">
+                Real-time engagement insights • 100% anonymous &amp; privacy-friendly • Supabase only
+              </p>
+            </div>
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+              <button type="button" id="btn-refresh-stats" class="btn-secondary" style="font-size: 0.82rem; padding: 0.45rem 0.9rem;">
+                🔄 Refresh Stats
+              </button>
+              <button type="button" id="btn-purge-old-events" class="btn-admin-action btn-delete" style="font-size: 0.82rem; padding: 0.45rem 0.9rem;">
+                🧹 Delete Events &gt; 90 Days
+              </button>
+            </div>
+          </div>
+
+          <!-- KPI Summary Cards (Today, 7 Days, 30 Days, All-Time) -->
+          <div id="stats-kpi-container" class="stats-summary-grid">
+            <div class="stats-kpi-card">
+              <div class="stats-kpi-header">
+                <span class="stats-kpi-title">Today's Traffic</span>
+                <span class="stats-kpi-badge">Today</span>
+              </div>
+              <div class="stats-kpi-values">
+                <div>
+                  <div class="stats-kpi-num" id="stat-today-views">0</div>
+                  <div class="stats-kpi-sub">Saree Views</div>
+                </div>
+                <div style="border-left: 1px solid #e2e8f0; padding-left: 0.75rem;">
+                  <div class="stats-kpi-num" style="color: #16a34a;" id="stat-today-clicks">0</div>
+                  <div class="stats-kpi-sub">WhatsApp Orders</div>
+                </div>
+              </div>
+              <div class="stats-kpi-conversion" id="stat-today-conv">0.0% conversion</div>
+            </div>
+
+            <div class="stats-kpi-card">
+              <div class="stats-kpi-header">
+                <span class="stats-kpi-title">Last 7 Days</span>
+                <span class="stats-kpi-badge">7 Days</span>
+              </div>
+              <div class="stats-kpi-values">
+                <div>
+                  <div class="stats-kpi-num" id="stat-7d-views">0</div>
+                  <div class="stats-kpi-sub">Saree Views</div>
+                </div>
+                <div style="border-left: 1px solid #e2e8f0; padding-left: 0.75rem;">
+                  <div class="stats-kpi-num" style="color: #16a34a;" id="stat-7d-clicks">0</div>
+                  <div class="stats-kpi-sub">WhatsApp Orders</div>
+                </div>
+              </div>
+              <div class="stats-kpi-conversion" id="stat-7d-conv">0.0% conversion</div>
+            </div>
+
+            <div class="stats-kpi-card">
+              <div class="stats-kpi-header">
+                <span class="stats-kpi-title">Last 30 Days</span>
+                <span class="stats-kpi-badge">30 Days</span>
+              </div>
+              <div class="stats-kpi-values">
+                <div>
+                  <div class="stats-kpi-num" id="stat-30d-views">0</div>
+                  <div class="stats-kpi-sub">Saree Views</div>
+                </div>
+                <div style="border-left: 1px solid #e2e8f0; padding-left: 0.75rem;">
+                  <div class="stats-kpi-num" style="color: #16a34a;" id="stat-30d-clicks">0</div>
+                  <div class="stats-kpi-sub">WhatsApp Orders</div>
+                </div>
+              </div>
+              <div class="stats-kpi-conversion" id="stat-30d-conv">0.0% conversion</div>
+            </div>
+
+            <div class="stats-kpi-card">
+              <div class="stats-kpi-header">
+                <span class="stats-kpi-title">All-Time Totals</span>
+                <span class="stats-kpi-badge">Lifetime</span>
+              </div>
+              <div class="stats-kpi-values">
+                <div>
+                  <div class="stats-kpi-num" id="stat-all-views">0</div>
+                  <div class="stats-kpi-sub">Views</div>
+                </div>
+                <div style="border-left: 1px solid #e2e8f0; padding-left: 0.75rem;">
+                  <div class="stats-kpi-num" style="color: #16a34a;" id="stat-all-clicks">0</div>
+                  <div class="stats-kpi-sub">Orders</div>
+                </div>
+                <div style="border-left: 1px solid #e2e8f0; padding-left: 0.75rem;">
+                  <div class="stats-kpi-num" style="color: #6366f1;" id="stat-all-visitors">0</div>
+                  <div class="stats-kpi-sub">Visitors</div>
+                </div>
+              </div>
+              <div class="stats-kpi-conversion" id="stat-all-conv">0.0% conversion</div>
+            </div>
+          </div>
+
+          <!-- Daily Activity Bar Chart (Pure SVG, no libraries) -->
+          <div class="stats-chart-card">
+            <div class="stats-chart-header">
+              <div>
+                <h3 class="stats-chart-title">Daily Activity Trend (Last 14 Days)</h3>
+                <span style="font-size: 0.76rem; color: #64748b;">Daily breakdown of saree views vs. WhatsApp order clicks</span>
+              </div>
+              <div class="stats-chart-legend">
+                <div class="stats-legend-item">
+                  <span class="stats-legend-dot" style="background: #6366f1;"></span>
+                  <span>Saree Views</span>
+                </div>
+                <div class="stats-legend-item">
+                  <span class="stats-legend-dot" style="background: #10b981;"></span>
+                  <span>WhatsApp Clicks</span>
+                </div>
+              </div>
+            </div>
+            <div class="stats-svg-container" id="stats-daily-chart-wrap">
+              <!-- Rendered via plain SVG by admin.js -->
+              <div style="text-align: center; padding: 2rem; color: #94a3b8; font-size: 0.85rem;">
+                Loading activity trend chart...
+              </div>
+            </div>
+          </div>
+
+          <!-- Saree Rankings Grid: Top Views & Top Orders -->
+          <div class="stats-sections-grid">
+            
+            <!-- Top 10 Most Viewed Sarees -->
+            <div class="stats-box">
+              <div class="stats-box-header">
+                <div>
+                  <h3 class="stats-box-title">🔥 Top 10 Most Viewed Sarees</h3>
+                  <div class="stats-box-subtitle">Sarees attracting the most customer attention</div>
+                </div>
+                <span class="stat-pill stat-pill-view">Views</span>
+              </div>
+              <div id="stats-top-viewed-list" style="overflow-x: auto;">
+                <div style="text-align: center; padding: 1.5rem; color: #94a3b8; font-size: 0.85rem;">
+                  Loading most viewed sarees...
+                </div>
+              </div>
+            </div>
+
+            <!-- Most Ordered (WhatsApp Clicks) -->
+            <div class="stats-box">
+              <div class="stats-box-header">
+                <div>
+                  <h3 class="stats-box-title">💬 Most Ordered (WhatsApp Clicks)</h3>
+                  <div class="stats-box-subtitle">Sarees resulting in the highest customer buy intent</div>
+                </div>
+                <span class="stat-pill stat-pill-click">Orders</span>
+              </div>
+              <div id="stats-top-clicked-list" style="overflow-x: auto;">
+                <div style="text-align: center; padding: 1.5rem; color: #94a3b8; font-size: 0.85rem;">
+                  Loading most ordered sarees...
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- High Views But No Orders (Needs Attention / Price Adjustments) -->
+          <div class="stats-box" style="margin-bottom: 1.5rem;">
+            <div class="stats-box-header">
+              <div>
+                <h3 class="stats-box-title" style="color: #b45309;">⚠️ Views But No Orders (Action Needed)</h3>
+                <div class="stats-box-subtitle">
+                  High customer views, but 0 WhatsApp orders. Customers are interested, but may find price high or need drape video / clearer photos.
+                </div>
+              </div>
+              <span class="stat-pill stat-pill-warn">Needs Review</span>
+            </div>
+            <div id="stats-no-clicks-list" style="overflow-x: auto;">
+              <div style="text-align: center; padding: 1.5rem; color: #94a3b8; font-size: 0.85rem;">
+                Analyzing customer conversion opportunities...
+              </div>
+            </div>
+          </div>
+
+          <!-- Database Pruning / Maintenance Card -->
+          <div class="stats-maintenance-card">
+            <div>
+              <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                <span style="font-size: 1.1rem;">🗄️</span>
+                <strong style="font-size: 0.88rem; color: #1e293b;">Database Size &amp; Maintenance</strong>
+              </div>
+              <p style="font-size: 0.78rem; color: #64748b; margin: 0; line-height: 1.4;">
+                To keep your Supabase database free and fast, prune events older than 90 days. Saree records, prices, and recent stats are never affected.
+              </p>
+            </div>
+            <button type="button" id="btn-purge-old-events-bottom" class="btn-secondary" style="font-size: 0.82rem; padding: 0.45rem 0.95rem; white-space: nowrap;">
+              🧹 Prune Events Older Than 90 Days
+            </button>
           </div>
 
         </div>

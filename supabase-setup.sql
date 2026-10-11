@@ -262,3 +262,113 @@ create policy "Authenticated admins can delete saree_private"
   on public.saree_private for delete to authenticated using (true);
 
 
+-- ==============================================================================
+-- 6. VISITOR AND SAREE STATISTICS (saree_events)
+-- ==============================================================================
+-- Lightweight, 100% privacy-compliant analytics table.
+-- No personal information, no names, no phone numbers, no IP addresses.
+-- ==============================================================================
+create table if not exists public.saree_events (
+  id bigint generated always as identity primary key,
+  saree_id bigint references public.sarees(id) on delete cascade,
+  event_type text not null check (event_type in ('view', 'whatsapp_click')),
+  created_at timestamptz not null default now(),
+  visitor_id text not null -- Anonymous client-generated UUID / random ID in localStorage
+);
+
+-- Performance Indexes
+create index if not exists idx_saree_events_saree_id on public.saree_events (saree_id);
+create index if not exists idx_saree_events_event_type on public.saree_events (event_type);
+create index if not exists idx_saree_events_created_at on public.saree_events (created_at desc);
+create index if not exists idx_saree_events_visitor_id on public.saree_events (visitor_id);
+
+-- Row Level Security (RLS)
+alter table public.saree_events enable row level security;
+
+-- Drop existing policies if re-running
+drop policy if exists "Anyone can insert saree_events" on public.saree_events;
+drop policy if exists "Authenticated admins can select saree_events" on public.saree_events;
+drop policy if exists "Authenticated admins can delete saree_events" on public.saree_events;
+
+-- RLS Policy: Anyone (public / anon) can INSERT only
+create policy "Anyone can insert saree_events"
+  on public.saree_events for insert
+  to public
+  with check (event_type in ('view', 'whatsapp_click'));
+
+-- RLS Policy: Only authenticated admin can SELECT
+create policy "Authenticated admins can select saree_events"
+  on public.saree_events for select
+  to authenticated
+  using (true);
+
+-- RLS Policy: Only authenticated admin can DELETE (for pruning old events)
+create policy "Authenticated admins can delete saree_events"
+  on public.saree_events for delete
+  to authenticated
+  using (true);
+
+
+-- ------------------------------------------------------------------------------
+-- Admin Analytics View: saree_stats_summary
+-- Aggregates views, WhatsApp clicks, and unique visitors per saree
+-- across 7 days, 30 days, and all time.
+-- ------------------------------------------------------------------------------
+create or replace view public.saree_stats_summary as
+select 
+  s.id as saree_id,
+  s.name as saree_name,
+  s.price,
+  s.status,
+  s.images,
+  
+  -- All-time statistics
+  count(case when e.event_type = 'view' then 1 end)::bigint as views_all_time,
+  count(case when e.event_type = 'whatsapp_click' then 1 end)::bigint as clicks_all_time,
+  count(distinct case when e.event_type = 'view' then e.visitor_id end)::bigint as unique_visitors_all_time,
+  
+  -- Last 30 days
+  count(case when e.event_type = 'view' and e.created_at >= (now() - interval '30 days') then 1 end)::bigint as views_30d,
+  count(case when e.event_type = 'whatsapp_click' and e.created_at >= (now() - interval '30 days') then 1 end)::bigint as clicks_30d,
+  count(distinct case when e.event_type = 'view' and e.created_at >= (now() - interval '30 days') then e.visitor_id end)::bigint as unique_visitors_30d,
+
+  -- Last 7 days
+  count(case when e.event_type = 'view' and e.created_at >= (now() - interval '7 days') then 1 end)::bigint as views_7d,
+  count(case when e.event_type = 'whatsapp_click' and e.created_at >= (now() - interval '7 days') then 1 end)::bigint as clicks_7d,
+  count(distinct case when e.event_type = 'view' and e.created_at >= (now() - interval '7 days') then e.visitor_id end)::bigint as unique_visitors_7d
+
+from public.sarees s
+left join public.saree_events e on s.id = e.saree_id
+group by s.id, s.name, s.price, s.status, s.images;
+
+
+-- ------------------------------------------------------------------------------
+-- RPC Function: delete_old_saree_events
+-- Safely purges events older than X days (default 90) to keep DB footprint minimal.
+-- ------------------------------------------------------------------------------
+create or replace function public.delete_old_saree_events(days_threshold integer default 90)
+returns integer
+language plpgsql
+security definer
+as $$
+declare
+  deleted_count integer;
+begin
+  if auth.role() <> 'authenticated' then
+    raise exception 'Unauthorized: Only logged-in admin can delete old events';
+  end if;
+
+  delete from public.saree_events
+  where created_at < (now() - (days_threshold || ' days')::interval);
+
+  get diagnostics deleted_count = row_count;
+  return deleted_count;
+end;
+$$;
+
+-- Permissions
+grant select on public.saree_stats_summary to authenticated;
+grant execute on function public.delete_old_saree_events(integer) to authenticated;
+
+
+
