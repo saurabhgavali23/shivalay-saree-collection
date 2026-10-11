@@ -409,6 +409,11 @@
     cacheDom();
 
     if (dom.adminShopTitle) dom.adminShopTitle.textContent = CONFIG.SHOP_NAME;
+    const adminLogoIcon = document.getElementById('admin-logo-icon');
+    if (adminLogoIcon && CONFIG.ICON_URL) {
+      adminLogoIcon.src = CONFIG.ICON_URL;
+      adminLogoIcon.alt = CONFIG.SHOP_NAME;
+    }
 
     // Datalists
     if (dom.fabricSuggestionsList && CONFIG.FABRIC_SUGGESTIONS) {
