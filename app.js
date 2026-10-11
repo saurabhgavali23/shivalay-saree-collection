@@ -539,6 +539,18 @@
     if (footerName) footerName.textContent = CONFIG.SHOP_NAME;
     if (footerTagline) footerTagline.textContent = CONFIG.SHOP_TAGLINE;
 
+    const headerLogo = document.getElementById('header-logo-img');
+    if (headerLogo && CONFIG.LOGO_URL) {
+      headerLogo.src = CONFIG.LOGO_URL;
+      headerLogo.alt = CONFIG.SHOP_NAME;
+    }
+
+    const footerIcon = document.getElementById('footer-logo-icon');
+    if (footerIcon && CONFIG.ICON_URL) {
+      footerIcon.src = CONFIG.ICON_URL;
+      footerIcon.alt = CONFIG.SHOP_NAME;
+    }
+
     // Contact WhatsApp links
     const genericMsg = `Hello ${CONFIG.SHOP_NAME}, I would like to inquire about your online saree collection.`;
     const defaultWaUrl = buildWhatsAppUrl(genericMsg);

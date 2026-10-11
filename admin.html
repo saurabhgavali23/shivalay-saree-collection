@@ -10,6 +10,10 @@
   <title>Admin Portal | Shivalay Saree Collection</title>
   <meta name="theme-color" content="#1e293b">
 
+  <!-- Favicon & App Icons -->
+  <link rel="icon" type="image/svg+xml" href="shivalay-monogram-icon.svg">
+  <link rel="apple-touch-icon" href="shivalay-monogram-icon.svg">
+
   <!-- Google Fonts Preconnect & Stylesheet -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -27,8 +31,11 @@
   <header class="admin-header">
     <div class="container admin-header-inner">
       <div class="admin-brand-wrap">
-        <a href="index.html" style="font-family: var(--font-serif); font-size: 1.15rem; font-weight: 700; color: var(--color-primary);" id="admin-shop-title">
-          Shivalay Saree Collection
+        <a href="index.html" class="admin-brand-link" id="admin-shop-title-link">
+          <img src="shivalay-monogram-icon.svg" alt="Shivalay Saree Collection" id="admin-logo-icon" class="admin-brand-icon" width="32" height="32">
+          <span style="font-family: var(--font-serif); font-size: 1.15rem; font-weight: 700; color: var(--color-primary);" id="admin-shop-title">
+            Shivalay Saree Collection
+          </span>
         </a>
         <span class="admin-badge">Admin</span>
       </div>
@@ -50,7 +57,9 @@
        ========================================================================= -->
   <div id="auth-view" class="auth-wrapper">
     <div class="auth-card">
-      <div class="auth-logo-icon">🔐</div>
+      <div class="auth-logo-icon">
+        <img src="shivalay-monogram-icon.svg" alt="Shivalay Saree Collection Icon" class="auth-brand-icon" width="68" height="68">
+      </div>
       <h1 class="auth-title">Admin Sign In</h1>
       <p class="auth-sub">Manage your sarees, prices, and inventory</p>
 

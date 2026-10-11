@@ -33,6 +33,8 @@ const CONFIG = {
   SHOP_NAME: "Shivalay Saree Collection",
   SHOP_TAGLINE: "Pure Elegance in Every Weave • 100% Online Saree Boutique",
   SITE_URL: "https://shivalaycollection.online",
+  LOGO_URL: "shivalay-monogram-logo.svg",
+  ICON_URL: "shivalay-monogram-icon.svg",
 
   // WhatsApp number in international format without '+' or spaces.
   // Format for India: 91 followed by 10-digit phone number -> "919876543210"
