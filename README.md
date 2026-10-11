@@ -29,7 +29,7 @@ A mobile-first, high-performance online saree catalog website with a built-in ad
 - **SEO Protection**: Includes `<meta name="robots" content="noindex, nofollow">` to prevent search engine indexing.
 - **Supabase Authentication**: Secure email and password login with session persistence across browser refreshes.
 - **Video Drape Upload & YouTube Link**:
-  - **Upload Video**: Records from camera or picks from gallery. Validates duration (**max 15 seconds**) and size (**max 15 MB**) client-side. Automatically extracts the first frame on HTML5 Canvas to generate a high-quality JPEG poster!
+  - **Upload Video**: Records from camera or picks from gallery. Validates duration (**max 60 seconds**) and size (**max 15 MB**) client-side. Automatically extracts the first frame on HTML5 Canvas to generate a high-quality JPEG poster!
   - **Paste Video Link**: Accepts YouTube links (`youtube.com` or `youtu.be`) or direct `.mp4` URLs.
   - Video preview with instant removal. Deleting a saree also removes its video and poster files from Supabase Storage.
 - **Client-Side Image Compression**: Automatically resizes large camera photos to max 1200px (JPEG quality ~0.8) using Canvas before uploading.
