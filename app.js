@@ -227,11 +227,13 @@
       msg += `\n\n*Delivery Address:*\n*Name:* ${customerAddress.name}\n*Contact:* ${customerAddress.phone}\n*Address:* ${customerAddress.address}\n*City & State:* ${customerAddress.city}, ${customerAddress.state}\n*PIN Code:* ${customerAddress.pincode}`;
     }
 
+    msg += `\n\n*Catalog Link:*\n${currentUrl}`;
+
     if (photo && !photo.startsWith('data:image/svg+xml')) {
-      msg += `\n\n*Saree Photo:*\n${photo}`;
+      msg += `\n\n*Direct Saree Photo:*\n${photo}`;
     }
 
-    msg += `\n\n*Catalog Link:*\n${currentUrl}\n\nPlease confirm availability and payment details.`;
+    msg += `\n\nPlease confirm availability and payment details.`;
     return msg;
   }
 
@@ -1296,16 +1298,22 @@
           <div class="cta-group">
             ${actionButtonsHtml}
             
-            <button type="button" id="btn-share-saree" class="btn-share" aria-label="Share this saree">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="18" cy="5" r="3"></circle>
-                <circle cx="6" cy="12" r="3"></circle>
-                <circle cx="18" cy="19" r="3"></circle>
-                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
-                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
-              </svg>
-              <span>Share Saree</span>
-            </button>
+            <div class="share-btn-row">
+              <button type="button" id="btn-share-whatsapp" class="btn-share-wa" aria-label="Share this saree on WhatsApp">
+                <span class="share-wa-icon">💬</span>
+                <span>Share on WhatsApp</span>
+              </button>
+              <button type="button" id="btn-share-saree" class="btn-share-native" aria-label="Copy link or more share options">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="18" cy="5" r="3"></circle>
+                  <circle cx="6" cy="12" r="3"></circle>
+                  <circle cx="18" cy="19" r="3"></circle>
+                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+                </svg>
+                <span>Copy Link</span>
+              </button>
+            </div>
           </div>
 
         </div>
@@ -1362,6 +1370,11 @@
         state.currentOrderPhoto = imgUrl;
       }
     });
+
+    const shareWaBtn = document.getElementById('btn-share-whatsapp');
+    if (shareWaBtn) {
+      shareWaBtn.addEventListener('click', () => handleWhatsAppShare(saree));
+    }
 
     const shareBtn = document.getElementById('btn-share-saree');
     if (shareBtn) {
@@ -1678,12 +1691,40 @@
     document.body.style.overflow = '';
   }
 
+  function buildSareeShareText(saree) {
+    const chosenColor = state.selectedSareeColor || saree.color || 'As shown';
+    const shipping = getShippingInfo(saree);
+    const shippingText = shipping.isFree ? 'Free Delivery Pan-India' : `${formatPrice(shipping.amount)} Insured Shipping`;
+    const photo = state.currentOrderPhoto || saree.mainImage || (saree.images && saree.images[0]) || '';
+    const currentUrl = window.location.href;
+
+    let text = `🌸 *${saree.name}*\n` +
+      `🏛️ *${CONFIG.SHOP_NAME}*\n\n` +
+      `💰 *Price:* ${formatPrice(saree.price)} (${shippingText})\n` +
+      `🎨 *Color:* ${chosenColor}\n` +
+      `🧵 *Fabric:* ${saree.fabric}\n` +
+      (saree.pattern ? `✨ *Work:* ${saree.pattern}\n` : '') +
+      (saree.blouse ? `👚 *Blouse Piece:* ${saree.blouse}\n` : '') +
+      `\n🔗 *Catalog Link:*\n${currentUrl}`;
+
+    if (photo && !photo.startsWith('data:image/svg+xml') && photo !== currentUrl) {
+      text += `\n\n🖼️ *Saree Photo:*\n${photo}`;
+    }
+
+    return text;
+  }
+
+  function handleWhatsAppShare(saree) {
+    const text = buildSareeShareText(saree);
+    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, '_blank');
+  }
+
   function handleShare(saree) {
-    const chosenColor = state.selectedSareeColor || saree.color || '';
-    const colorText = chosenColor ? ` in ${chosenColor}` : '';
+    const shareText = buildSareeShareText(saree);
     const shareData = {
       title: `${saree.name} | ${CONFIG.SHOP_NAME}`,
-      text: `Take a look at this stunning ${saree.fabric} saree${colorText} (${formatPrice(saree.price)}) at ${CONFIG.SHOP_NAME}!`,
+      text: shareText,
       url: window.location.href
     };
 
@@ -1776,16 +1817,26 @@
     if (metaDesc) metaDesc.setAttribute('content', desc);
     if (ogTitle) ogTitle.setAttribute('content', `${saree.name} | ${CONFIG.SHOP_NAME}`);
     if (ogDesc) ogDesc.setAttribute('content', desc);
-    if (ogImage) ogImage.setAttribute('content', saree.mainImage);
+    if (ogImage && saree.mainImage && !saree.mainImage.endsWith('.svg')) {
+      ogImage.setAttribute('content', saree.mainImage);
+    }
     if (ogUrl) ogUrl.setAttribute('content', window.location.href);
   }
 
   function resetMeta() {
     document.title = `${CONFIG.SHOP_NAME} | ${CONFIG.SHOP_TAGLINE}`;
     const metaDesc = document.getElementById('meta-description');
-    if (metaDesc) {
-      metaDesc.setAttribute('content', `Discover authentic Kanjivaram, Banarasi, Chanderi, and silk sarees at ${CONFIG.SHOP_NAME}. 100% online boutique with Pan-India delivery. Order directly on WhatsApp.`);
-    }
+    const ogTitle = document.getElementById('og-title');
+    const ogDesc = document.getElementById('og-description');
+    const ogImage = document.getElementById('og-image');
+    const ogUrl = document.getElementById('og-url');
+
+    const defaultDesc = `Discover handpicked Kanjivaram, Banarasi, Chanderi, and pure silk sarees directly from master weavers. Fast order confirmation via WhatsApp.`;
+    if (metaDesc) metaDesc.setAttribute('content', defaultDesc);
+    if (ogTitle) ogTitle.setAttribute('content', `${CONFIG.SHOP_NAME} | Handloom, Silk & Bridal Sarees`);
+    if (ogDesc) ogDesc.setAttribute('content', defaultDesc);
+    if (ogImage) ogImage.setAttribute('content', 'https://shivalaycollection.online/og-preview.jpg');
+    if (ogUrl) ogUrl.setAttribute('content', 'https://shivalaycollection.online/');
   }
 
   // ----------------------------------------------------------------------------
