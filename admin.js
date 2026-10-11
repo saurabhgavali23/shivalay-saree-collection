@@ -39,7 +39,9 @@
     selectedReviewSareeId: null,
     currentReviewPhotos: [],
     editingReviewId: null,
-    formColors: []             // Array of available colors added to currently edited saree
+    formColors: [],            // Array of available colors added to currently edited saree
+    statsEvents: null,         // Cached raw saree_events rows
+    isLoadingStats: false
   };
 
   const PLACEHOLDER_IMG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='800' viewBox='0 0 600 800'%3E%3Crect fill='%23f4ede4' width='600' height='800'/%3E%3Ctext fill='%239c9389' font-family='sans-serif' font-size='24' font-weight='600' x='50%25' y='50%25' text-anchor='middle'%3ENo Photo%3C/text%3E%3C/svg%3E";
@@ -71,14 +73,25 @@
     dom.tabListBtn = document.getElementById('tab-list-btn');
     dom.tabReviewsBtn = document.getElementById('tab-reviews-btn');
     dom.tabCleanupBtn = document.getElementById('tab-cleanup-btn');
+    dom.tabStatsBtn = document.getElementById('tab-stats-btn');
     dom.tabFormContent = document.getElementById('tab-form-content');
     dom.tabListContent = document.getElementById('tab-list-content');
     dom.tabReviewsContent = document.getElementById('tab-reviews-content');
     dom.tabCleanupContent = document.getElementById('tab-cleanup-content');
+    dom.tabStatsContent = document.getElementById('tab-stats-content');
     dom.totalSareesCount = document.getElementById('total-sarees-count');
     dom.totalReviewsCount = document.getElementById('total-reviews-count');
     dom.orphanTabBadge = document.getElementById('orphan-tab-badge');
     dom.formTabLabel = document.getElementById('form-tab-label');
+
+    // Stats DOM
+    dom.btnRefreshStats = document.getElementById('btn-refresh-stats');
+    dom.btnPurgeOldEvents = document.getElementById('btn-purge-old-events');
+    dom.btnPurgeOldEventsBottom = document.getElementById('btn-purge-old-events-bottom');
+    dom.statsDailyChartWrap = document.getElementById('stats-daily-chart-wrap');
+    dom.statsTopViewedList = document.getElementById('stats-top-viewed-list');
+    dom.statsTopClickedList = document.getElementById('stats-top-clicked-list');
+    dom.statsNoClicksList = document.getElementById('stats-no-clicks-list');
 
     // Reviews DOM
     dom.reviewSareeSelect = document.getElementById('review-saree-select');
@@ -473,6 +486,10 @@
   // ----------------------------------------------------------------------------
   function setLoggedIn(user) {
     state.currentUser = user;
+    try {
+      localStorage.setItem('msc_admin_logged_in', '1');
+    } catch (e) {}
+
     if (dom.authView) dom.authView.style.display = 'none';
     if (dom.dashboardView) dom.dashboardView.classList.add('active');
     if (dom.btnLogout) dom.btnLogout.style.display = 'inline-flex';
@@ -484,6 +501,10 @@
   function setLoggedOut() {
     state.currentUser = null;
     state.orphanFiles = null;
+    try {
+      localStorage.removeItem('msc_admin_logged_in');
+    } catch (e) {}
+
     if (dom.authView) dom.authView.style.display = 'flex';
     if (dom.dashboardView) dom.dashboardView.classList.remove('active');
     if (dom.btnLogout) dom.btnLogout.style.display = 'none';
@@ -2861,6 +2882,568 @@
   }
 
   // ----------------------------------------------------------------------------
+  // VISITOR & SAREE ANALYTICS (STATS TAB)
+  // ----------------------------------------------------------------------------
+  async function loadStatsData() {
+    if (!state.supabaseClient) {
+      showToast('Supabase client not connected.');
+      return;
+    }
+
+    if (dom.statsDailyChartWrap) {
+      dom.statsDailyChartWrap.innerHTML = `
+        <div style="text-align: center; padding: 2.5rem; color: #64748b; font-size: 0.85rem;">
+          Loading statistics from Supabase...
+        </div>
+      `;
+    }
+
+    try {
+      // 1. Fetch events from saree_events
+      const { data: events, error } = await state.supabaseClient
+        .from('saree_events')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      state.statsEvents = events || [];
+
+      // Ensure sarees catalog is loaded
+      if (state.allSarees.length === 0) {
+        const { data: sareesData } = await state.supabaseClient
+          .from('sarees')
+          .select('*')
+          .order('id', { ascending: false });
+        if (sareesData) state.allSarees = sareesData;
+      }
+
+      processAndRenderStats(state.statsEvents, state.allSarees);
+
+    } catch (err) {
+      console.error('Failed to load statistics:', err);
+      showToast('Could not load statistics: ' + err.message);
+      if (dom.statsDailyChartWrap) {
+        dom.statsDailyChartWrap.innerHTML = `
+          <div style="text-align: center; padding: 2.5rem 1rem; color: #dc2626;">
+            <p style="font-weight: 700; margin-bottom: 0.5rem;">⚠️ Statistics Not Available Yet</p>
+            <p style="font-size: 0.82rem; color: #64748b; margin-bottom: 1rem;">
+              Make sure you have run the updated SQL in <code>supabase-setup.sql</code> in your Supabase SQL Editor.<br>
+              ${escapeHtml(err.message)}
+            </p>
+            <button type="button" id="btn-stats-retry" class="btn-secondary" style="font-size: 0.82rem;">
+              🔄 Retry
+            </button>
+          </div>
+        `;
+        const retryBtn = document.getElementById('btn-stats-retry');
+        if (retryBtn) retryBtn.addEventListener('click', loadStatsData);
+      }
+    }
+  }
+
+  function processAndRenderStats(events, sarees) {
+    const now = Date.now();
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const tToday = startOfToday.getTime();
+    const t7d = now - (7 * 86400000);
+    const t30d = now - (30 * 86400000);
+
+    let todayViews = 0, todayClicks = 0;
+    let views7d = 0, clicks7d = 0;
+    let views30d = 0, clicks30d = 0;
+    let allViews = 0, allClicks = 0;
+    const allVisitorsSet = new Set();
+
+    // Map each saree to its statistics
+    const sareeStatsMap = new Map();
+    sarees.forEach(s => {
+      sareeStatsMap.set(s.id, {
+        id: s.id,
+        name: s.name,
+        price: s.price,
+        status: s.status,
+        fabric: s.fabric || 'Silk',
+        images: Array.isArray(s.images) ? s.images : (s.image_url ? [s.image_url] : []),
+        views7d: 0,
+        clicks7d: 0,
+        views30d: 0,
+        clicks30d: 0,
+        viewsAll: 0,
+        clicksAll: 0,
+        uniqueVisitors: new Set()
+      });
+    });
+
+    events.forEach(e => {
+      const time = new Date(e.created_at).getTime();
+      const isView = e.event_type === 'view';
+      const isClick = e.event_type === 'whatsapp_click';
+
+      // KPI Time windows
+      if (time >= tToday) {
+        if (isView) todayViews++;
+        if (isClick) todayClicks++;
+      }
+      if (time >= t7d) {
+        if (isView) views7d++;
+        if (isClick) clicks7d++;
+      }
+      if (time >= t30d) {
+        if (isView) views30d++;
+        if (isClick) clicks30d++;
+      }
+      if (isView) allViews++;
+      if (isClick) allClicks++;
+
+      if (e.visitor_id) {
+        allVisitorsSet.add(e.visitor_id);
+      }
+
+      // Per-saree counters
+      if (e.saree_id && sareeStatsMap.has(e.saree_id)) {
+        const item = sareeStatsMap.get(e.saree_id);
+        if (time >= t7d) {
+          if (isView) item.views7d++;
+          if (isClick) item.clicks7d++;
+        }
+        if (time >= t30d) {
+          if (isView) item.views30d++;
+          if (isClick) item.clicks30d++;
+        }
+        if (isView) {
+          item.viewsAll++;
+          if (e.visitor_id) item.uniqueVisitors.add(e.visitor_id);
+        }
+        if (isClick) item.clicksAll++;
+      }
+    });
+
+    // 1. Update KPI Card numbers
+    const elTodayV = document.getElementById('stat-today-views');
+    const elTodayC = document.getElementById('stat-today-clicks');
+    const elTodayConv = document.getElementById('stat-today-conv');
+    if (elTodayV) elTodayV.textContent = todayViews;
+    if (elTodayC) elTodayC.textContent = todayClicks;
+    if (elTodayConv) {
+      const conv = todayViews > 0 ? ((todayClicks / todayViews) * 100).toFixed(1) : '0.0';
+      elTodayConv.textContent = `${conv}% conversion`;
+    }
+
+    const el7dV = document.getElementById('stat-7d-views');
+    const el7dC = document.getElementById('stat-7d-clicks');
+    const el7dConv = document.getElementById('stat-7d-conv');
+    if (el7dV) el7dV.textContent = views7d;
+    if (el7dC) el7dC.textContent = clicks7d;
+    if (el7dConv) {
+      const conv = views7d > 0 ? ((clicks7d / views7d) * 100).toFixed(1) : '0.0';
+      el7dConv.textContent = `${conv}% conversion`;
+    }
+
+    const el30dV = document.getElementById('stat-30d-views');
+    const el30dC = document.getElementById('stat-30d-clicks');
+    const el30dConv = document.getElementById('stat-30d-conv');
+    if (el30dV) el30dV.textContent = views30d;
+    if (el30dC) el30dC.textContent = clicks30d;
+    if (el30dConv) {
+      const conv = views30d > 0 ? ((clicks30d / views30d) * 100).toFixed(1) : '0.0';
+      el30dConv.textContent = `${conv}% conversion`;
+    }
+
+    const elAllV = document.getElementById('stat-all-views');
+    const elAllC = document.getElementById('stat-all-clicks');
+    const elAllVis = document.getElementById('stat-all-visitors');
+    const elAllConv = document.getElementById('stat-all-conv');
+    if (elAllV) elAllV.textContent = allViews;
+    if (elAllC) elAllC.textContent = allClicks;
+    if (elAllVis) elAllVis.textContent = allVisitorsSet.size;
+    if (elAllConv) {
+      const conv = allViews > 0 ? ((allClicks / allViews) * 100).toFixed(1) : '0.0';
+      elAllConv.textContent = `${conv}% conversion`;
+    }
+
+    // 2. Generate 14-day daily buckets for SVG Bar Chart
+    const dailyTrend = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const dateKey = `${yyyy}-${mm}-${dd}`;
+      const label = (i === 0) ? 'Today' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      dailyTrend.push({
+        dateKey: dateKey,
+        dateStr: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        label: label,
+        views: 0,
+        clicks: 0
+      });
+    }
+
+    events.forEach(e => {
+      const eDateKey = new Date(e.created_at).toISOString().split('T')[0];
+      const match = dailyTrend.find(d => d.dateKey === eDateKey);
+      if (match) {
+        if (e.event_type === 'view') match.views++;
+        else if (e.event_type === 'whatsapp_click') match.clicks++;
+      }
+    });
+
+    renderDailyActivityChart(dailyTrend);
+
+    // 3. Render Top 10 Most Viewed Sarees
+    const allSareeStats = Array.from(sareeStatsMap.values());
+    const topViewed = [...allSareeStats].sort((a, b) => b.viewsAll - a.viewsAll).slice(0, 10);
+    renderTopViewedTable(topViewed);
+
+    // 4. Render Most Ordered (WhatsApp Clicks)
+    const topClicked = [...allSareeStats].filter(s => s.clicksAll > 0).sort((a, b) => b.clicksAll - a.clicksAll).slice(0, 10);
+    renderTopClickedTable(topClicked);
+
+    // 5. Render Views But No Orders (Needs Attention / Opportunities)
+    const noClicks = [...allSareeStats].filter(s => s.viewsAll > 0 && s.clicksAll === 0).sort((a, b) => b.viewsAll - a.viewsAll);
+    renderNoClicksTable(noClicks);
+  }
+
+  function renderDailyActivityChart(dailyData) {
+    if (!dom.statsDailyChartWrap) return;
+
+    if (!dailyData || dailyData.length === 0) {
+      dom.statsDailyChartWrap.innerHTML = `
+        <div style="text-align: center; padding: 2rem; color: #94a3b8; font-size: 0.85rem;">
+          No visitor activity recorded yet.
+        </div>
+      `;
+      return;
+    }
+
+    const svgWidth = 680;
+    const svgHeight = 220;
+    const chartLeft = 40;
+    const chartRight = 660;
+    const chartTop = 25;
+    const chartBottom = 165;
+    const chartHeight = chartBottom - chartTop;
+    const chartWidth = chartRight - chartLeft;
+
+    let maxVal = 1;
+    dailyData.forEach(d => {
+      if (d.views > maxVal) maxVal = d.views;
+      if (d.clicks > maxVal) maxVal = d.clicks;
+    });
+    maxVal = Math.ceil(maxVal * 1.15);
+
+    const numSlots = dailyData.length;
+    const slotWidth = chartWidth / numSlots;
+    const barWidth = Math.min(14, Math.max(6, Math.floor(slotWidth * 0.32)));
+
+    // Grid lines (0, 50%, 100%)
+    let gridLinesHtml = '';
+    const steps = [0, Math.round(maxVal / 2), maxVal];
+    steps.forEach(val => {
+      const y = chartBottom - (val / maxVal) * chartHeight;
+      gridLinesHtml += `
+        <line x1="${chartLeft}" y1="${y}" x2="${chartRight}" y2="${y}" stroke="#e2e8f0" stroke-dasharray="3,3" stroke-width="1" />
+        <text x="${chartLeft - 6}" y="${y + 3}" text-anchor="end" font-size="10" fill="#94a3b8">${val}</text>
+      `;
+    });
+
+    let barsHtml = '';
+    dailyData.forEach((d, idx) => {
+      const slotCenterX = chartLeft + (idx + 0.5) * slotWidth;
+      const viewBarX = slotCenterX - barWidth - 1;
+      const clickBarX = slotCenterX + 1;
+
+      const viewHeight = Math.max(2, (d.views / maxVal) * chartHeight);
+      const viewY = chartBottom - viewHeight;
+
+      const clickHeight = Math.max(2, (d.clicks / maxVal) * chartHeight);
+      const clickY = chartBottom - clickHeight;
+
+      barsHtml += `
+        <g class="chart-day-group">
+          <!-- Views bar -->
+          <rect x="${viewBarX}" y="${viewY}" width="${barWidth}" height="${viewHeight}" rx="3" fill="#6366f1">
+            <title>${d.dateStr}: ${d.views} Views</title>
+          </rect>
+          ${d.views > 0 ? `<text x="${viewBarX + barWidth / 2}" y="${viewY - 4}" text-anchor="middle" font-size="9" font-weight="600" fill="#4f46e5">${d.views}</text>` : ''}
+
+          <!-- Clicks bar -->
+          <rect x="${clickBarX}" y="${clickY}" width="${barWidth}" height="${clickHeight}" rx="3" fill="#10b981">
+            <title>${d.dateStr}: ${d.clicks} WhatsApp Orders</title>
+          </rect>
+          ${d.clicks > 0 ? `<text x="${clickBarX + barWidth / 2}" y="${clickY - 4}" text-anchor="middle" font-size="9" font-weight="600" fill="#059669">${d.clicks}</text>` : ''}
+
+          <!-- Date label below axis -->
+          <text x="${slotCenterX}" y="185" text-anchor="middle" font-size="10" fill="#64748b">${d.label}</text>
+        </g>
+      `;
+    });
+
+    dom.statsDailyChartWrap.innerHTML = `
+      <svg class="stats-svg-chart" viewBox="0 0 ${svgWidth} ${svgHeight}" preserveAspectRatio="xMidYMid meet">
+        <line x1="${chartLeft}" y1="${chartBottom}" x2="${chartRight}" y2="${chartBottom}" stroke="#cbd5e1" stroke-width="1.5" />
+        ${gridLinesHtml}
+        ${barsHtml}
+      </svg>
+    `;
+  }
+
+  function renderTopViewedTable(sarees) {
+    if (!dom.statsTopViewedList) return;
+
+    if (!sarees || sarees.length === 0 || sarees.every(s => s.viewsAll === 0)) {
+      dom.statsTopViewedList.innerHTML = `
+        <div style="text-align: center; padding: 1.5rem; color: #94a3b8; font-size: 0.85rem;">
+          No saree views recorded yet.
+        </div>
+      `;
+      return;
+    }
+
+    dom.statsTopViewedList.innerHTML = `
+      <table class="stats-table">
+        <thead>
+          <tr>
+            <th style="width: 30px;">#</th>
+            <th>Saree</th>
+            <th>Price</th>
+            <th title="Total Views / Last 30d">Views</th>
+            <th>Orders</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sarees.map((s, idx) => {
+            const thumb = (s.images && s.images[0]) || PLACEHOLDER_IMG;
+            const conv = s.viewsAll > 0 ? ((s.clicksAll / s.viewsAll) * 100).toFixed(0) : '0';
+            return `
+              <tr>
+                <td style="font-weight: 700; color: #64748b;">${idx + 1}</td>
+                <td>
+                  <div class="stats-saree-cell">
+                    <img src="${escapeHtml(thumb)}" alt="${escapeHtml(s.name)}" class="stats-thumb-img" onerror="this.src='${PLACEHOLDER_IMG}';">
+                    <div>
+                      <span class="stats-saree-name" title="${escapeHtml(s.name)}">#${s.id} ${escapeHtml(s.name)}</span>
+                      <span class="stats-saree-sub">${escapeHtml(s.fabric)} • ${s.uniqueVisitors.size} visitors</span>
+                    </div>
+                  </div>
+                </td>
+                <td style="font-weight: 600;">${formatPrice(s.price)}</td>
+                <td>
+                  <span class="stat-pill stat-pill-view">👁️ ${s.viewsAll}</span>
+                  <span style="font-size: 0.72rem; color: #64748b; margin-left: 3px;">(${s.views30d} in 30d)</span>
+                </td>
+                <td>
+                  <span class="stat-pill stat-pill-click">💬 ${s.clicksAll}</span>
+                  <span style="font-size: 0.72rem; color: #16a34a; font-weight: 600; margin-left: 3px;">${conv}%</span>
+                </td>
+                <td>
+                  <button type="button" class="btn-admin-action btn-stats-edit-saree" data-id="${s.id}" style="font-size: 0.75rem; padding: 2px 7px;">
+                    ✏️ Edit
+                  </button>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    `;
+
+    attachStatsEditListeners();
+  }
+
+  function renderTopClickedTable(sarees) {
+    if (!dom.statsTopClickedList) return;
+
+    if (!sarees || sarees.length === 0) {
+      dom.statsTopClickedList.innerHTML = `
+        <div style="text-align: center; padding: 1.5rem; color: #94a3b8; font-size: 0.85rem;">
+          No WhatsApp order clicks recorded yet.
+        </div>
+      `;
+      return;
+    }
+
+    dom.statsTopClickedList.innerHTML = `
+      <table class="stats-table">
+        <thead>
+          <tr>
+            <th style="width: 30px;">#</th>
+            <th>Saree</th>
+            <th>Price</th>
+            <th>Orders</th>
+            <th>Views</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sarees.map((s, idx) => {
+            const thumb = (s.images && s.images[0]) || PLACEHOLDER_IMG;
+            const conv = s.viewsAll > 0 ? ((s.clicksAll / s.viewsAll) * 100).toFixed(0) : '0';
+            return `
+              <tr>
+                <td style="font-weight: 700; color: #16a34a;">${idx + 1}</td>
+                <td>
+                  <div class="stats-saree-cell">
+                    <img src="${escapeHtml(thumb)}" alt="${escapeHtml(s.name)}" class="stats-thumb-img" onerror="this.src='${PLACEHOLDER_IMG}';">
+                    <div>
+                      <span class="stats-saree-name" title="${escapeHtml(s.name)}">#${s.id} ${escapeHtml(s.name)}</span>
+                      <span class="stats-saree-sub">${escapeHtml(s.fabric)} • ${s.status}</span>
+                    </div>
+                  </div>
+                </td>
+                <td style="font-weight: 600;">${formatPrice(s.price)}</td>
+                <td>
+                  <span class="stat-pill stat-pill-click">💬 ${s.clicksAll} orders</span>
+                  <span style="font-size: 0.72rem; color: #16a34a; font-weight: 600; margin-left: 3px;">(${s.clicks30d} in 30d)</span>
+                </td>
+                <td>
+                  <span class="stat-pill stat-pill-view">👁️ ${s.viewsAll}</span>
+                  <span style="font-size: 0.72rem; color: #64748b; margin-left: 3px;">${conv}% rate</span>
+                </td>
+                <td>
+                  <button type="button" class="btn-admin-action btn-stats-edit-saree" data-id="${s.id}" style="font-size: 0.75rem; padding: 2px 7px;">
+                    ✏️ Edit
+                  </button>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    `;
+
+    attachStatsEditListeners();
+  }
+
+  function renderNoClicksTable(sarees) {
+    if (!dom.statsNoClicksList) return;
+
+    if (!sarees || sarees.length === 0) {
+      dom.statsNoClicksList.innerHTML = `
+        <div style="text-align: center; padding: 1.5rem; color: #15803d; font-size: 0.85rem;">
+          🎉 All viewed sarees currently have customer orders or enquiries! No stalled sarees found.
+        </div>
+      `;
+      return;
+    }
+
+    dom.statsNoClicksList.innerHTML = `
+      <table class="stats-table">
+        <thead>
+          <tr>
+            <th>Saree</th>
+            <th>Price</th>
+            <th>Status</th>
+            <th>Views</th>
+            <th>Action Suggestion</th>
+            <th>Manage</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sarees.slice(0, 10).map(s => {
+            const thumb = (s.images && s.images[0]) || PLACEHOLDER_IMG;
+            return `
+              <tr>
+                <td>
+                  <div class="stats-saree-cell">
+                    <img src="${escapeHtml(thumb)}" alt="${escapeHtml(s.name)}" class="stats-thumb-img" onerror="this.src='${PLACEHOLDER_IMG}';">
+                    <div>
+                      <span class="stats-saree-name" title="${escapeHtml(s.name)}">#${s.id} ${escapeHtml(s.name)}</span>
+                      <span class="stats-saree-sub">${escapeHtml(s.fabric)}</span>
+                    </div>
+                  </div>
+                </td>
+                <td style="font-weight: 600; color: #b91c1c;">${formatPrice(s.price)}</td>
+                <td>
+                  <span class="badge ${s.status === 'Sold' ? 'badge-sold' : 'badge-available'}">${s.status}</span>
+                </td>
+                <td>
+                  <span class="stat-pill stat-pill-warn">👁️ ${s.viewsAll} views (0 orders)</span>
+                </td>
+                <td style="font-size: 0.75rem; color: #475569; max-width: 250px;">
+                  💡 Customer interest without order. Consider dropping price ₹100–₹200 or adding drape video.
+                </td>
+                <td>
+                  <button type="button" class="btn-admin-action btn-stats-edit-saree" data-id="${s.id}" style="font-size: 0.75rem; padding: 3px 8px; font-weight: 600;">
+                    ✏️ Edit Price/Photos
+                  </button>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    `;
+
+    attachStatsEditListeners();
+  }
+
+  function attachStatsEditListeners() {
+    document.querySelectorAll('.btn-stats-edit-saree').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-id');
+        const saree = state.allSarees.find(s => String(s.id) === String(id));
+        if (saree) {
+          startEditingSaree(saree);
+        }
+      });
+    });
+  }
+
+  async function purgeOldEvents() {
+    if (!state.supabaseClient) return;
+
+    const countEstimate = (state.statsEvents || []).filter(e => {
+      const t = new Date(e.created_at).getTime();
+      return t < (Date.now() - 90 * 86400000);
+    }).length;
+
+    const confirmed = confirm(
+      `Delete visitor and analytics events older than 90 days?\n\n` +
+      `This permanently deletes old event log rows (${countEstimate} older than 90 days) to keep your Supabase database free and fast.\n\n` +
+      `Saree records, prices, and recent stats will not be affected.`
+    );
+    if (!confirmed) return;
+
+    setProgress('Purging events older than 90 days...', 40);
+
+    try {
+      let deletedCount = null;
+      // 1. Try RPC function
+      try {
+        const { data, error } = await state.supabaseClient.rpc('delete_old_saree_events', { days_threshold: 90 });
+        if (!error && data !== null) deletedCount = data;
+      } catch (rpcErr) {
+        console.warn('RPC delete_old_saree_events not available, using direct delete fallback:', rpcErr);
+      }
+
+      // 2. Direct delete fallback
+      if (deletedCount === null) {
+        const cutoff = new Date(Date.now() - 90 * 86400000).toISOString();
+        const { error: delErr } = await state.supabaseClient
+          .from('saree_events')
+          .delete()
+          .lt('created_at', cutoff);
+        if (delErr) throw delErr;
+      }
+
+      setProgress(null, null);
+      showToast('Database maintenance complete! Old events pruned successfully.');
+      await loadStatsData();
+    } catch (err) {
+      setProgress(null, null);
+      console.error('Failed to purge old events:', err);
+      showToast('Cleanup error: ' + err.message);
+    }
+  }
+
+  // ----------------------------------------------------------------------------
   // TAB SWITCHER
   // ----------------------------------------------------------------------------
   function switchToTab(tabName) {
@@ -2868,11 +3451,13 @@
     if (dom.tabListBtn) dom.tabListBtn.classList.toggle('active', tabName === 'list');
     if (dom.tabReviewsBtn) dom.tabReviewsBtn.classList.toggle('active', tabName === 'reviews');
     if (dom.tabCleanupBtn) dom.tabCleanupBtn.classList.toggle('active', tabName === 'cleanup');
+    if (dom.tabStatsBtn) dom.tabStatsBtn.classList.toggle('active', tabName === 'stats');
 
     if (dom.tabFormContent) dom.tabFormContent.style.display = tabName === 'form' ? 'block' : 'none';
     if (dom.tabListContent) dom.tabListContent.style.display = tabName === 'list' ? 'block' : 'none';
     if (dom.tabReviewsContent) dom.tabReviewsContent.style.display = tabName === 'reviews' ? 'block' : 'none';
     if (dom.tabCleanupContent) dom.tabCleanupContent.style.display = tabName === 'cleanup' ? 'block' : 'none';
+    if (dom.tabStatsContent) dom.tabStatsContent.style.display = tabName === 'stats' ? 'block' : 'none';
 
     if (tabName === 'reviews') {
       populateReviewSareeDropdown();
@@ -2880,6 +3465,8 @@
       if (state.orphanFiles === null && !state.isScanningOrphans) {
         scanOrphanFiles();
       }
+    } else if (tabName === 'stats') {
+      loadStatsData();
     }
   }
 
@@ -2896,6 +3483,12 @@
     if (dom.tabListBtn) dom.tabListBtn.addEventListener('click', () => switchToTab('list'));
     if (dom.tabReviewsBtn) dom.tabReviewsBtn.addEventListener('click', () => switchToTab('reviews'));
     if (dom.tabCleanupBtn) dom.tabCleanupBtn.addEventListener('click', () => switchToTab('cleanup'));
+    if (dom.tabStatsBtn) dom.tabStatsBtn.addEventListener('click', () => switchToTab('stats'));
+
+    // Stats Actions
+    if (dom.btnRefreshStats) dom.btnRefreshStats.addEventListener('click', loadStatsData);
+    if (dom.btnPurgeOldEvents) dom.btnPurgeOldEvents.addEventListener('click', purgeOldEvents);
+    if (dom.btnPurgeOldEventsBottom) dom.btnPurgeOldEventsBottom.addEventListener('click', purgeOldEvents);
 
     // Reviews
     if (dom.reviewSareeSelect) {

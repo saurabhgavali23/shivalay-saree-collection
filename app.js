@@ -481,6 +481,9 @@
     const saree = state.currentOrderSaree;
     if (!saree) return;
 
+    // Track WhatsApp click event (safely wrapped, never blocks user)
+    trackSareeWhatsAppClick(saree.id);
+
     const color = state.currentOrderColor || state.selectedSareeColor || saree.color || 'Multicolor';
     const photo = state.currentOrderPhoto || (saree.images && saree.images[0]) || saree.mainImage || '';
 
@@ -518,6 +521,86 @@
       state.isDemoMode = true;
       if (dom.demoModeBanner) dom.demoModeBanner.classList.add('visible');
     }
+  }
+
+  // ----------------------------------------------------------------------------
+  // VISITOR & SAREE EVENT TRACKING (ANONYMOUS & PRIVACY-COMPLIANT)
+  // ----------------------------------------------------------------------------
+  function isTrackingAllowed() {
+    // 1. Honor browser Do Not Track preference
+    if (navigator.doNotTrack === '1' || window.doNotTrack === '1' || navigator.msDoNotTrack === '1') {
+      return false;
+    }
+    // 2. Do not track if admin is logged in
+    try {
+      if (localStorage.getItem('msc_admin_logged_in') === '1') return false;
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+          const val = localStorage.getItem(k);
+          if (val && val.includes('access_token')) return false;
+        }
+      }
+    } catch (e) {}
+
+    return true;
+  }
+
+  function getOrCreateVisitorId() {
+    const STORAGE_KEY = 'msc_visitor_id';
+    let vid = null;
+    try {
+      vid = localStorage.getItem(STORAGE_KEY);
+      if (!vid) {
+        if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+          vid = crypto.randomUUID();
+        } else {
+          vid = 'v_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 10);
+        }
+        localStorage.setItem(STORAGE_KEY, vid);
+      }
+    } catch (e) {
+      vid = 'v_' + Math.random().toString(36).substring(2, 10);
+    }
+    return vid;
+  }
+
+  async function trackSareeEvent(eventType, sareeId) {
+    if (!isTrackingAllowed()) return;
+    if (!state.supabaseClient) return;
+    if (!sareeId) return;
+
+    try {
+      const visitorId = getOrCreateVisitorId();
+      await state.supabaseClient
+        .from('saree_events')
+        .insert([{
+          saree_id: sareeId,
+          event_type: eventType,
+          visitor_id: visitorId
+        }]);
+    } catch (err) {
+      // Must never break user experience or block navigation
+      console.warn('Anonymous event tracking failed silently:', err);
+    }
+  }
+
+  function trackSareeView(sareeId) {
+    if (!sareeId) return;
+    // Count each saree once per visitor per hour (remember it in sessionStorage)
+    const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
+    const viewKey = `msc_saree_view_${sareeId}_${hourBucket}`;
+    try {
+      if (sessionStorage.getItem(viewKey)) return;
+      sessionStorage.setItem(viewKey, '1');
+    } catch (e) {}
+
+    trackSareeEvent('view', sareeId);
+  }
+
+  function trackSareeWhatsAppClick(sareeId) {
+    if (!sareeId) return;
+    trackSareeEvent('whatsapp_click', sareeId);
   }
 
   // ----------------------------------------------------------------------------
@@ -1037,6 +1120,9 @@
     document.title = `${saree.name} | ${CONFIG.SHOP_NAME}`;
     updateMeta(saree);
 
+    // Track saree view event (once per saree per hour per visitor)
+    trackSareeView(saree.id);
+
     const allImages = saree.images.length > 0 ? saree.images : [PLACEHOLDER_IMG];
 
     const colorsList = Array.isArray(saree.available_colors) && saree.available_colors.length > 0
@@ -1327,7 +1413,15 @@
     if (waBtn) {
       waBtn.addEventListener('click', (e) => {
         e.preventDefault();
+        trackSareeWhatsAppClick(saree.id);
         openAddressModal(saree, state.selectedSareeColor, selectedPhotoUrl);
+      });
+    }
+
+    const askSimilarBtn = dom.sareeDetailContent.querySelector('.ask-similar-link');
+    if (askSimilarBtn) {
+      askSimilarBtn.addEventListener('click', () => {
+        trackSareeWhatsAppClick(saree.id);
       });
     }
 
