@@ -3,7 +3,7 @@
  * SHIVALAY SAREE COLLECTION - PUBLIC CATALOG SCRIPT (app.js)
  * ==============================================================================
  * Connects to Supabase Database (or demo fallback if unconfigured):
- * - Hash routing (#/ and #/saree/:id) with scroll preservation
+ * - History API routing (/ and /saree/:id) with scroll preservation
  * - Dynamic category, fabric, and color filters
  * - Real-time price slider and "Hide Sold" toggle
  * - Search by name, fabric, and description
@@ -23,7 +23,7 @@
   const state = {
     allSarees: [],
     filteredSarees: [],
-    currentRoute: '#/',
+    currentRoute: '/',
     catalogScrollY: 0,
     activeCategory: 'all',
     activeFabric: 'all',
@@ -677,7 +677,7 @@
       const adminBtn = document.createElement('div');
       adminBtn.style.cssText = 'text-align: center; margin-top: 2rem; grid-column: 1 / -1;';
       adminBtn.innerHTML = `
-        <a href="admin.html" id="how-to-order-admin-btn" title="Go to Store Admin Panel"
+        <a href="/admin.html" id="how-to-order-admin-btn" title="Go to Store Admin Panel"
            style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1.25rem;
                   border: 1px solid var(--color-border, #e2d4c0); border-radius: 9999px;
                   color: var(--color-text-muted, #888); font-size: 0.78rem; font-weight: 500;
@@ -1065,7 +1065,7 @@
 
       return `
         <article class="saree-card ${saree.isSold ? 'is-sold' : ''}" data-id="${escapeHtml(saree.id)}">
-          <a href="#/saree/${encodeURIComponent(saree.id)}" class="saree-card-link" aria-label="View details of ${escapeHtml(saree.name)}">
+          <a href="/saree/${encodeURIComponent(saree.id)}" data-link class="saree-card-link" aria-label="View details of ${escapeHtml(saree.name)}">
             <div class="card-img-wrap">
               ${newBadge}
               ${soldBadge}
@@ -1109,7 +1109,7 @@
             <div class="state-icon">⚠️</div>
             <h3 class="state-title">Saree Not Found</h3>
             <p class="state-desc">The saree code <strong>#${escapeHtml(sareeId)}</strong> could not be found in our catalog.</p>
-            <a href="#/" class="btn-primary">Browse All Sarees</a>
+            <a href="/" data-link class="btn-primary">Browse All Sarees</a>
           </div>
         `;
       }
@@ -1871,7 +1871,7 @@
       const simShipping = getShippingInfo(s);
       return `
       <article class="saree-card ${s.isSold ? 'is-sold' : ''}">
-        <a href="#/saree/${encodeURIComponent(s.id)}" class="saree-card-link">
+        <a href="/saree/${encodeURIComponent(s.id)}" data-link class="saree-card-link">
           <div class="card-img-wrap">
             ${s.isSold ? '<span class="badge-sold-out">Sold Out</span>' : ''}
             <img 
@@ -1934,14 +1934,29 @@
   }
 
   // ----------------------------------------------------------------------------
-  // HASH ROUTER
+  // HISTORY API ROUTER  ( /  and  /saree/:id )
   // ----------------------------------------------------------------------------
-  function handleRouting() {
-    const hash = window.location.hash || '#/';
-    state.currentRoute = hash;
+  function getRoutePath() {
+    return window.location.pathname.replace(/\/+$/, '') || '/';
+  }
 
-    if (hash.startsWith('#/saree/')) {
-      const sareeId = decodeURIComponent(hash.replace('#/saree/', '')).trim();
+  function navigate(url) {
+    const target = new URL(url, window.location.origin);
+    if (target.origin !== window.location.origin) { window.location.href = url; return; }
+    if (target.pathname + target.search === window.location.pathname + window.location.search) {
+      return; // already there
+    }
+    history.pushState({}, '', target.pathname + target.search);
+    handleRouting();
+  }
+
+  function handleRouting() {
+    const path = getRoutePath();
+    state.currentRoute = path;
+    const match = path.match(/^\/saree\/([^/]+)$/);
+
+    if (match) {
+      const sareeId = decodeURIComponent(match[1]).trim();
 
       if (!dom.catalogView.classList.contains('hidden')) {
         state.catalogScrollY = window.scrollY;
@@ -1949,6 +1964,7 @@
 
       dom.catalogView.classList.add('hidden');
       dom.detailView.classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'instant' });
 
       if (state.allSarees.length > 0) {
         renderSareeDetail(sareeId);
@@ -1968,7 +1984,16 @@
   // EVENT LISTENERS
   // ----------------------------------------------------------------------------
   function setupEventListeners() {
-    window.addEventListener('hashchange', handleRouting);
+    window.addEventListener('popstate', handleRouting);
+
+    // One click handler for every in-app link marked with data-link
+    document.addEventListener('click', e => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const link = e.target.closest && e.target.closest('a[data-link]');
+      if (!link || link.target === '_blank') return;
+      e.preventDefault();
+      navigate(link.getAttribute('href'));
+    });
 
     // Search
     let searchTimer = null;
