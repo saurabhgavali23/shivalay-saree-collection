@@ -22,7 +22,6 @@
   // ----------------------------------------------------------------------------
   const state = {
     allSarees: [],
-    filteredSarees: [],
     currentRoute: '/',
     catalogScrollY: 0,
     activeCategory: 'all',
@@ -39,14 +38,23 @@
     searchQuery: '',
     sortBy: 'newest',
     page: 1,
+    pageItems: [],
+    totalCount: 0,
+    facets: { categories: [], fabrics: [], colors: [], priceMin: 0, priceMax: 50000, total: 0 },
+    dataMode: 'remote',   // 'remote' = paginated Supabase queries, 'demo' = local fallback data
+    requestSeq: 0,
+    detailSeq: 0,
+    pageCache: new Map(),
+    sareeCache: new Map(),
     supabaseClient: null,
     isDemoMode: false
   };
 
   const PAGE_SIZE = 24;
 
-  const CACHE_KEY = 'msc_supabase_sarees_cache_v2';
-  const CACHE_TIME_KEY = 'msc_supabase_sarees_time_v2';
+  const FACETS_KEY = 'msc_supabase_facets_v1';
+  const FACETS_TIME_KEY = 'msc_supabase_facets_time_v1';
+  const cacheTtlMs = () => (CONFIG.CACHE_TTL_MINUTES || 5) * 60 * 1000;
   const PLACEHOLDER_IMG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='800' viewBox='0 0 600 800'%3E%3Crect fill='%23f4ede4' width='600' height='800'/%3E%3Ctext fill='%239c9389' font-family='sans-serif' font-size='24' font-weight='600' x='50%25' y='50%25' text-anchor='middle'%3ESaree Image Coming Soon%3C/text%3E%3C/svg%3E";
 
   // ----------------------------------------------------------------------------
@@ -758,67 +766,114 @@
     if (dom.errorState) dom.errorState.style.display = 'none';
   }
 
+  function getFacetRows() {
+    // Lightweight query: only the columns needed for filter dropdowns and the price slider.
+    const cachedTime = parseInt(sessionStorage.getItem(FACETS_TIME_KEY) || '0', 10);
+    const cached = sessionStorage.getItem(FACETS_KEY);
+    if (cached && Date.now() - cachedTime < cacheTtlMs()) {
+      try { return Promise.resolve(JSON.parse(cached)); } catch (e) { /* refetch */ }
+    }
+    return state.supabaseClient
+      .from('sarees')
+      .select('category,fabric,color,available_colors,price')
+      .limit(5000)
+      .then(({ data, error }) => {
+        if (error) throw error;
+        try {
+          sessionStorage.setItem(FACETS_KEY, JSON.stringify(data));
+          sessionStorage.setItem(FACETS_TIME_KEY, String(Date.now()));
+        } catch (e) { /* storage full: ignore */ }
+        return data;
+      });
+  }
+
+  function computeFacets(rows) {
+    const cats = new Set(), fabrics = new Set(), colors = new Set();
+    const prices = [];
+    rows.forEach(r => {
+      if (r.category) cats.add(String(r.category).trim());
+      if (r.fabric) fabrics.add(String(r.fabric).trim());
+      let list = [];
+      if (Array.isArray(r.available_colors) && r.available_colors.length) list = r.available_colors;
+      else if (r.color) list = String(r.color).split(/[,/|]+/);
+      list.map(c => String(c).trim()).filter(Boolean).forEach(c => colors.add(c));
+      const p = parseFloat(r.price);
+      if (p > 0) prices.push(p);
+    });
+    return {
+      categories: Array.from(cats).sort(),
+      fabrics: Array.from(fabrics).sort(),
+      colors: Array.from(colors).sort(),
+      priceMin: prices.length ? Math.floor(Math.min(...prices)) : 0,
+      priceMax: prices.length ? Math.ceil(Math.max(...prices)) : 50000,
+      total: rows.length
+    };
+  }
+
+  function useDemoData() {
+    console.info('Running in demo mode with fallback data.');
+    state.dataMode = 'demo';
+    state.allSarees = normalizeData(CONFIG.FALLBACK_DATA || []);
+    state.allSarees.forEach(cacheSaree);
+    state.facets = computeFacets(state.allSarees);
+    initializeFiltersAndData();
+  }
+
   function loadCatalogData(forceRefresh = false) {
     renderSkeletons();
 
-    // Check sessionStorage cache
-    const ttlMs = (CONFIG.CACHE_TTL_MINUTES || 5) * 60 * 1000;
-    const cachedTime = sessionStorage.getItem(CACHE_TIME_KEY);
-    const cachedData = sessionStorage.getItem(CACHE_KEY);
-
-    if (!forceRefresh && cachedData && cachedTime) {
-      const age = Date.now() - parseInt(cachedTime, 10);
-      if (age < ttlMs) {
-        try {
-          const parsed = JSON.parse(cachedData);
-          state.allSarees = normalizeData(parsed);
-          initializeFiltersAndData();
-          return;
-        } catch (e) {
-          sessionStorage.removeItem(CACHE_KEY);
-        }
-      }
+    if (forceRefresh) {
+      state.pageCache.clear();
+      state.sareeCache.clear();
+      sessionStorage.removeItem(FACETS_KEY);
+      sessionStorage.removeItem(FACETS_TIME_KEY);
     }
 
     // If Supabase is not configured, load demo data
     if (!state.supabaseClient) {
-      console.info('Running in demo mode with fallback data.');
-      state.allSarees = normalizeData(CONFIG.FALLBACK_DATA || []);
-      initializeFiltersAndData();
+      useDemoData();
       return;
     }
 
-    // Query live Supabase database
-    state.supabaseClient
-      .from('sarees')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .then(({ data, error }) => {
-        if (error) {
-          throw error;
-        }
-
-        if (!data || data.length === 0) {
-          // If database is empty, fallback to demo items
+    state.dataMode = 'remote';
+    getFacetRows()
+      .then(rows => {
+        if (!rows || rows.length === 0) {
           console.info('Database table is empty, showing sample data.');
-          state.allSarees = normalizeData(CONFIG.FALLBACK_DATA || []);
-        } else {
-          state.allSarees = normalizeData(data);
-          // Cache in sessionStorage
-          try {
-            sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
-            sessionStorage.setItem(CACHE_TIME_KEY, String(Date.now()));
-          } catch (e) {
-            console.warn('Storage quota exceeded:', e);
-          }
+          useDemoData();
+          return;
         }
-
+        state.facets = computeFacets(rows);
         initializeFiltersAndData();
       })
       .catch(err => {
         console.error('Failed to load sarees from Supabase:', err);
         showErrorState(err.message || 'Could not connect to Supabase.');
       });
+  }
+
+  function cacheSaree(saree) {
+    state.sareeCache.set(String(saree.id), { saree, t: Date.now() });
+  }
+
+  // Escape a value for use inside a PostgREST filter string, e.g. category.eq."Party Wear"
+  function pgQuote(v) {
+    return '"' + String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+  }
+
+  // Fetch one saree by id (cache first, then Supabase). Resolves to a normalized saree or null.
+  async function getSaree(id) {
+    const key = String(id);
+    const hit = state.sareeCache.get(key);
+    if (hit && Date.now() - hit.t < cacheTtlMs()) return hit.saree;
+    if (state.dataMode === 'demo' || !state.supabaseClient) return hit ? hit.saree : null;
+    if (!/^\d+$/.test(key)) return null;
+    const { data, error } = await state.supabaseClient.from('sarees').select('*').eq('id', key).maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    const saree = normalizeData([data])[0];
+    cacheSaree(saree);
+    return saree;
   }
 
   function sanitizeVideoUrl(url) {
@@ -917,10 +972,8 @@
   function initializeFiltersAndData() {
     if (dom.errorState) dom.errorState.style.display = 'none';
 
-    // Price extremes
-    const prices = state.allSarees.map(s => s.price).filter(p => p > 0);
-    state.priceMin = prices.length ? Math.floor(Math.min(...prices)) : 0;
-    state.priceMax = prices.length ? Math.ceil(Math.max(...prices)) : 50000;
+    state.priceMin = state.facets.priceMin;
+    state.priceMax = state.facets.priceMax;
 
     if (dom.filterPriceRange) {
       dom.filterPriceRange.min = state.priceMin;
@@ -935,27 +988,14 @@
     populateFilterDropdowns();
     populateQuickCategoryPills();
     applyFiltersAndRender();
-    handleRouting();
+    // In remote mode a saree detail loads itself by id; demo data needs a route refresh once loaded.
+    if (state.dataMode === 'demo') handleRouting();
   }
 
   function populateFilterDropdowns() {
-    const cats = new Set();
-    const fabrics = new Set();
-    const colors = new Set();
-
-    state.allSarees.forEach(s => {
-      if (s.category) cats.add(s.category);
-      if (s.fabric) fabrics.add(s.fabric);
-      if (s.available_colors && s.available_colors.length) {
-        s.available_colors.forEach(c => colors.add(c));
-      } else if (s.color) {
-        colors.add(s.color);
-      }
-    });
-
-    fillSelect(dom.filterCategory, Array.from(cats).sort(), 'All Categories');
-    fillSelect(dom.filterFabric, Array.from(fabrics).sort(), 'All Fabrics');
-    fillSelect(dom.filterColor, Array.from(colors).sort(), 'All Colors');
+    fillSelect(dom.filterCategory, state.facets.categories, 'All Categories');
+    fillSelect(dom.filterFabric, state.facets.fabrics, 'All Fabrics');
+    fillSelect(dom.filterColor, state.facets.colors, 'All Colors');
   }
 
   function fillSelect(el, items, allLabel) {
@@ -968,7 +1008,7 @@
 
   function populateQuickCategoryPills() {
     if (!dom.quickCategoryPills) return;
-    const cats = Array.from(new Set(state.allSarees.map(s => s.category))).sort();
+    const cats = state.facets.categories;
 
     let html = `<button type="button" class="pill-item active" data-category="all">All Sarees</button>`;
     cats.forEach(cat => {
@@ -993,40 +1033,104 @@
 
   function applyFiltersAndRender() {
     state.page = 1; // any filter/search/sort change starts from the first page
+    loadPage();
+  }
+
+  function matchesLocalFilters(s, q) {
+    if (q) {
+      const matchName = s.name.toLowerCase().includes(q);
+      const matchDesc = s.description.toLowerCase().includes(q);
+      const matchFabric = s.fabric.toLowerCase().includes(q);
+      if (!matchName && !matchDesc && !matchFabric) return false;
+    }
+    if (state.activeCategory !== 'all' && s.category !== state.activeCategory) return false;
+    if (state.activeFabric !== 'all' && s.fabric !== state.activeFabric) return false;
+    if (state.activeColor !== 'all') {
+      const hasColor = (s.available_colors && s.available_colors.includes(state.activeColor)) || (s.color === state.activeColor);
+      if (!hasColor) return false;
+    }
+    if (s.price > state.maxPrice) return false;
+    if (state.hideSold && s.isSold) return false;
+    return true;
+  }
+
+  // Demo mode: filter, sort and slice the in-memory fallback data
+  function queryLocalPage() {
     const q = state.searchQuery.toLowerCase().trim();
-
-    state.filteredSarees = state.allSarees.filter(s => {
-      if (q) {
-        const matchName = s.name.toLowerCase().includes(q);
-        const matchDesc = s.description.toLowerCase().includes(q);
-        const matchFabric = s.fabric.toLowerCase().includes(q);
-        if (!matchName && !matchDesc && !matchFabric) return false;
-      }
-
-      if (state.activeCategory !== 'all' && s.category !== state.activeCategory) return false;
-      if (state.activeFabric !== 'all' && s.fabric !== state.activeFabric) return false;
-      if (state.activeColor !== 'all') {
-        const hasColor = (s.available_colors && s.available_colors.includes(state.activeColor)) || (s.color === state.activeColor);
-        if (!hasColor) return false;
-      }
-      if (s.price > state.maxPrice) return false;
-      if (state.hideSold && s.isSold) return false;
-
-      return true;
-    });
-
-    // Sorting
-    state.filteredSarees.sort((a, b) => {
+    const list = state.allSarees.filter(s => matchesLocalFilters(s, q));
+    list.sort((a, b) => {
       if (state.sortBy === 'price-asc') return a.price - b.price;
       if (state.sortBy === 'price-desc') return b.price - a.price;
-      // 'newest'
-      const da = new Date(a.created_at).getTime() || 0;
-      const db = new Date(b.created_at).getTime() || 0;
-      return db - da;
+      return (new Date(b.created_at).getTime() || 0) - (new Date(a.created_at).getTime() || 0);
     });
+    const start = (state.page - 1) * PAGE_SIZE;
+    return { items: list.slice(start, start + PAGE_SIZE), count: list.length };
+  }
 
-    updateFilterStats();
-    renderCatalogGrid();
+  // Live mode: one Supabase query per page (filters, sort and range run in the database)
+  async function queryRemotePage() {
+    const from = (state.page - 1) * PAGE_SIZE;
+    let query = state.supabaseClient.from('sarees').select('*', { count: 'exact' });
+
+    const q = state.searchQuery.trim().replace(/[,()"\\%*_]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (q) query = query.or(`name.ilike.*${q}*,fabric.ilike.*${q}*,description.ilike.*${q}*`);
+    if (state.activeCategory !== 'all') query = query.eq('category', state.activeCategory);
+    if (state.activeFabric !== 'all') query = query.eq('fabric', state.activeFabric);
+    if (state.activeColor !== 'all') {
+      query = query.or(`available_colors.cs.{${pgQuote(state.activeColor)}},color.eq.${pgQuote(state.activeColor)}`);
+    }
+    if (state.maxPrice < state.priceMax) query = query.lte('price', state.maxPrice);
+    if (state.hideSold) query = query.neq('status', 'Sold');
+
+    if (state.sortBy === 'price-asc') query = query.order('price', { ascending: true });
+    else if (state.sortBy === 'price-desc') query = query.order('price', { ascending: false });
+    else query = query.order('created_at', { ascending: false });
+    query = query.order('id', { ascending: false }); // stable order across pages
+
+    const { data, count, error } = await query.range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    return { items: normalizeData(data || []), count: count || 0 };
+  }
+
+  async function loadPage() {
+    const seq = ++state.requestSeq;
+
+    try {
+      let result;
+      if (state.dataMode === 'demo') {
+        result = queryLocalPage();
+      } else {
+        const key = JSON.stringify([state.page, state.searchQuery.trim(), state.activeCategory, state.activeFabric,
+          state.activeColor, state.maxPrice < state.priceMax ? state.maxPrice : null, state.hideSold, state.sortBy]);
+        const hit = state.pageCache.get(key);
+        if (hit && Date.now() - hit.t < cacheTtlMs()) {
+          result = hit.result;
+        } else {
+          renderSkeletons();
+          if (dom.pagination) dom.pagination.classList.add('is-loading');
+          result = await queryRemotePage();
+          if (seq !== state.requestSeq) return; // a newer request superseded this one
+          state.pageCache.set(key, { t: Date.now(), result });
+        }
+        result.items.forEach(cacheSaree);
+      }
+
+      // Page no longer exists (e.g. data changed): jump to the last page
+      if (result.items.length === 0 && result.count > 0 && state.page > 1) {
+        state.page = Math.ceil(result.count / PAGE_SIZE);
+        return loadPage();
+      }
+
+      state.pageItems = result.items;
+      state.totalCount = result.count;
+      updateFilterStats();
+      renderCatalogGrid();
+    } catch (err) {
+      if (seq !== state.requestSeq) return;
+      console.error('Failed to load sarees from Supabase:', err);
+      if (dom.pagination) dom.pagination.innerHTML = '';
+      showErrorState(err.message || 'Could not connect to Supabase.');
+    }
   }
 
   function updateFilterStats() {
@@ -1044,14 +1148,17 @@
     }
 
     if (dom.resultsCount) {
-      dom.resultsCount.textContent = `Showing ${state.filteredSarees.length} of ${state.allSarees.length} sarees`;
+      const from = (state.page - 1) * PAGE_SIZE;
+      dom.resultsCount.textContent = state.totalCount === 0
+        ? 'No sarees found'
+        : `Showing ${from + 1}–${from + state.pageItems.length} of ${state.totalCount} sarees`;
     }
   }
 
   function renderCatalogGrid() {
     if (!dom.sareeGrid) return;
 
-    if (state.filteredSarees.length === 0) {
+    if (state.totalCount === 0) {
       dom.sareeGrid.innerHTML = '';
       if (dom.emptyState) dom.emptyState.style.display = 'block';
       renderPagination(0);
@@ -1060,12 +1167,10 @@
 
     if (dom.emptyState) dom.emptyState.style.display = 'none';
 
-    const totalPages = Math.ceil(state.filteredSarees.length / PAGE_SIZE);
-    state.page = Math.min(Math.max(state.page, 1), totalPages);
-    const start = (state.page - 1) * PAGE_SIZE;
+    const totalPages = Math.ceil(state.totalCount / PAGE_SIZE);
     renderPagination(totalPages);
 
-    dom.sareeGrid.innerHTML = state.filteredSarees.slice(start, start + PAGE_SIZE).map(saree => {
+    dom.sareeGrid.innerHTML = state.pageItems.map(saree => {
       const soldBadge = saree.isSold ? `<span class="badge-sold-out">Sold Out</span>` : '';
       const newBadge = (!saree.isSold && saree.isNew) ? `<span class="badge-new">New</span>` : '';
       const videoBadge = saree.video_url ? `<span class="badge-video">▶ Video</span>` : '';
@@ -1109,6 +1214,7 @@
 
   function renderPagination(totalPages) {
     if (!dom.pagination) return;
+    dom.pagination.classList.remove('is-loading');
     if (totalPages <= 1) { dom.pagination.innerHTML = ''; return; }
 
     const cur = state.page;
@@ -1133,7 +1239,8 @@
   // SAREE DETAIL PAGE
   // ----------------------------------------------------------------------------
   function renderSareeDetail(sareeId) {
-    const saree = state.allSarees.find(s => String(s.id) === String(sareeId));
+    const hit = state.sareeCache.get(String(sareeId));
+    const saree = hit ? hit.saree : null;
 
     if (!saree) {
       if (dom.sareeDetailContent) {
@@ -1886,13 +1993,34 @@
     document.body.removeChild(input);
   }
 
-  function renderSimilarSarees(current) {
+  async function renderSimilarSarees(current) {
     if (!dom.similarSection || !dom.similarSareesGrid) return;
 
-    const similar = state.allSarees.filter(s => {
-      if (String(s.id) === String(current.id)) return false;
-      return s.category === current.category || s.fabric === current.fabric;
-    }).slice(0, 4);
+    let similar = [];
+    try {
+      if (state.dataMode === 'demo') {
+        similar = state.allSarees.filter(s => {
+          if (String(s.id) === String(current.id)) return false;
+          return s.category === current.category || s.fabric === current.fabric;
+        }).slice(0, 4);
+      } else {
+        const { data, error } = await state.supabaseClient
+          .from('sarees')
+          .select('*')
+          .neq('id', current.id)
+          .or(`category.eq.${pgQuote(current.category)},fabric.eq.${pgQuote(current.fabric)}`)
+          .order('created_at', { ascending: false })
+          .limit(4);
+        if (error) throw error;
+        similar = normalizeData(data || []);
+        similar.forEach(cacheSaree);
+      }
+    } catch (err) {
+      console.warn('Could not load similar sarees:', err);
+    }
+
+    // The user may have navigated to another saree while this loaded
+    if (getRoutePath() !== `/saree/${encodeURIComponent(current.id)}`) return;
 
     if (similar.length === 0) {
       dom.similarSection.style.display = 'none';
@@ -1983,6 +2111,27 @@
     handleRouting();
   }
 
+  async function showSareeDetail(sareeId) {
+    const seq = ++state.detailSeq;
+    const hit = state.sareeCache.get(String(sareeId));
+    const fresh = hit && Date.now() - hit.t < cacheTtlMs();
+
+    if (!fresh && state.dataMode !== 'demo' && dom.sareeDetailContent) {
+      dom.sareeDetailContent.innerHTML = '<div class="state-box"><p class="state-desc">Loading saree…</p></div>';
+      if (dom.similarSection) dom.similarSection.style.display = 'none';
+    }
+
+    try {
+      await getSaree(sareeId);
+    } catch (err) {
+      console.error('Failed to load saree:', err);
+    }
+    if (seq !== state.detailSeq || !/^\/saree\//.test(getRoutePath())) return;
+    // Demo data is not loaded yet: initializeFiltersAndData() will re-run routing
+    if (state.dataMode === 'demo' && state.allSarees.length === 0) return;
+    renderSareeDetail(sareeId);
+  }
+
   function handleRouting() {
     const path = getRoutePath();
     state.currentRoute = path;
@@ -1999,9 +2148,7 @@
       dom.detailView.classList.add('active');
       window.scrollTo({ top: 0, behavior: 'instant' });
 
-      if (state.allSarees.length > 0) {
-        renderSareeDetail(sareeId);
-      }
+      showSareeDetail(sareeId);
     } else {
       resetMeta();
       dom.catalogView.classList.remove('hidden');
@@ -2024,7 +2171,7 @@
         const b = e.target.closest('button[data-page]');
         if (!b || b.disabled) return;
         state.page = parseInt(b.dataset.page, 10);
-        renderCatalogGrid();
+        loadPage();
         const top = dom.sareeGrid.getBoundingClientRect().top + window.scrollY - 140;
         window.scrollTo({ top: Math.max(top, 0), behavior: 'smooth' });
       });
@@ -2103,12 +2250,14 @@
       });
     }
 
-    // Price Slider
+    // Price Slider (debounced: each change is a database query)
+    let priceTimer = null;
     if (dom.filterPriceRange) {
       dom.filterPriceRange.addEventListener('input', e => {
         state.maxPrice = parseFloat(e.target.value);
         if (dom.priceSliderValue) dom.priceSliderValue.textContent = formatPrice(state.maxPrice);
-        applyFiltersAndRender();
+        clearTimeout(priceTimer);
+        priceTimer = setTimeout(applyFiltersAndRender, 250);
       });
     }
 
@@ -2156,16 +2305,13 @@
     if (dom.btnRetry) dom.btnRetry.addEventListener('click', () => loadCatalogData(true));
     if (dom.btnLoadFallback) {
       dom.btnLoadFallback.addEventListener('click', () => {
-        state.allSarees = normalizeData(CONFIG.FALLBACK_DATA || []);
-        initializeFiltersAndData();
+        useDemoData();
       });
     }
 
     // Force Refresh from footer
     if (dom.btnForceRefresh) {
       dom.btnForceRefresh.addEventListener('click', () => {
-        sessionStorage.removeItem(CACHE_KEY);
-        sessionStorage.removeItem(CACHE_TIME_KEY);
         showToast('Refreshing catalog from live database...');
         loadCatalogData(true);
       });
