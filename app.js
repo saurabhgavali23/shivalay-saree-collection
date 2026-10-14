@@ -38,9 +38,12 @@
     hideSold: false,
     searchQuery: '',
     sortBy: 'newest',
+    page: 1,
     supabaseClient: null,
     isDemoMode: false
   };
+
+  const PAGE_SIZE = 24;
 
   const CACHE_KEY = 'msc_supabase_sarees_cache_v2';
   const CACHE_TIME_KEY = 'msc_supabase_sarees_time_v2';
@@ -55,6 +58,7 @@
     dom.catalogView = document.getElementById('catalog-view');
     dom.detailView = document.getElementById('detail-view');
     dom.sareeGrid = document.getElementById('saree-grid');
+    dom.pagination = document.getElementById('pagination');
     dom.sareeDetailContent = document.getElementById('saree-detail-content');
     dom.similarSection = document.getElementById('similar-section');
     dom.similarSareesGrid = document.getElementById('similar-sarees-grid');
@@ -988,6 +992,7 @@
   }
 
   function applyFiltersAndRender() {
+    state.page = 1; // any filter/search/sort change starts from the first page
     const q = state.searchQuery.toLowerCase().trim();
 
     state.filteredSarees = state.allSarees.filter(s => {
@@ -1049,12 +1054,18 @@
     if (state.filteredSarees.length === 0) {
       dom.sareeGrid.innerHTML = '';
       if (dom.emptyState) dom.emptyState.style.display = 'block';
+      renderPagination(0);
       return;
     }
 
     if (dom.emptyState) dom.emptyState.style.display = 'none';
 
-    dom.sareeGrid.innerHTML = state.filteredSarees.map(saree => {
+    const totalPages = Math.ceil(state.filteredSarees.length / PAGE_SIZE);
+    state.page = Math.min(Math.max(state.page, 1), totalPages);
+    const start = (state.page - 1) * PAGE_SIZE;
+    renderPagination(totalPages);
+
+    dom.sareeGrid.innerHTML = state.filteredSarees.slice(start, start + PAGE_SIZE).map(saree => {
       const soldBadge = saree.isSold ? `<span class="badge-sold-out">Sold Out</span>` : '';
       const newBadge = (!saree.isSold && saree.isNew) ? `<span class="badge-new">New</span>` : '';
       const videoBadge = saree.video_url ? `<span class="badge-video">▶ Video</span>` : '';
@@ -1094,6 +1105,28 @@
         </article>
       `;
     }).join('');
+  }
+
+  function renderPagination(totalPages) {
+    if (!dom.pagination) return;
+    if (totalPages <= 1) { dom.pagination.innerHTML = ''; return; }
+
+    const cur = state.page;
+    const pages = [];
+    for (let p = 1; p <= totalPages; p++) {
+      if (p === 1 || p === totalPages || Math.abs(p - cur) <= 1) pages.push(p);
+      else if (pages[pages.length - 1] !== '…') pages.push('…');
+    }
+
+    const btn = (label, page, extra = '', aria = '') =>
+      `<button type="button" class="page-btn ${extra}" data-page="${page}" ${aria}>${label}</button>`;
+
+    dom.pagination.innerHTML =
+      btn('‹ Prev', cur - 1, cur === 1 ? 'disabled' : '', `aria-label="Previous page" ${cur === 1 ? 'disabled' : ''}`) +
+      pages.map(p => p === '…'
+        ? `<span class="page-ellipsis">…</span>`
+        : btn(p, p, p === cur ? 'active' : '', `aria-label="Page ${p}" ${p === cur ? 'aria-current="page"' : ''}`)).join('') +
+      btn('Next ›', cur + 1, cur === totalPages ? 'disabled' : '', `aria-label="Next page" ${cur === totalPages ? 'disabled' : ''}`);
   }
 
   // ----------------------------------------------------------------------------
@@ -1985,6 +2018,17 @@
   // ----------------------------------------------------------------------------
   function setupEventListeners() {
     window.addEventListener('popstate', handleRouting);
+
+    if (dom.pagination) {
+      dom.pagination.addEventListener('click', e => {
+        const b = e.target.closest('button[data-page]');
+        if (!b || b.disabled) return;
+        state.page = parseInt(b.dataset.page, 10);
+        renderCatalogGrid();
+        const top = dom.sareeGrid.getBoundingClientRect().top + window.scrollY - 140;
+        window.scrollTo({ top: Math.max(top, 0), behavior: 'smooth' });
+      });
+    }
 
     // One click handler for every in-app link marked with data-link
     document.addEventListener('click', e => {
